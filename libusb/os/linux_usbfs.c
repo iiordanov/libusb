@@ -38,6 +38,11 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
+
+
 /* sysfs vs usbfs:
  * opening a usbfs node causes the device to be resumed, so we attempt to
  * avoid this during enumeration.
@@ -98,6 +103,11 @@ static int init_count = 0;
 #ifdef __ANDROID__
 /* have no authority to operate usb device directly */
 static int weak_authority = 0;
+
+/* java native environment, to open devices via */
+JNIEnv *jni_env = NULL;
+
+static int android_scan_devices(struct libusb_context *ctx);
 #endif
 
 /* Serialize hotplug start/stop */
@@ -402,7 +412,9 @@ static int op_init(struct libusb_context *ctx)
 	}
 
 #ifdef __ANDROID__
-	if (weak_authority) {
+    if (jni_env != NULL) {
+        return android_scan_devices(ctx);
+    } else if (weak_authority) {
 		return LIBUSB_SUCCESS;
 	}
 #endif
@@ -449,20 +461,224 @@ static void op_exit(struct libusb_context *ctx)
 static int op_set_option(struct libusb_context *ctx, enum libusb_option option, va_list ap)
 {
 	UNUSED(ctx);
-	UNUSED(ap);
+    usbi_dbg("op_set_option");
 
 #ifdef __ANDROID__
 	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
 		usbi_dbg("set libusb has weak authority");
 		weak_authority = 1;
 		return LIBUSB_SUCCESS;
-	}
+	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
+        jni_env = va_arg(ap, JNIEnv *);
+        usbi_dbg("got jnienv pointer: %p", jni_env);
+		return LIBUSB_SUCCESS;
+    }
 #else
+	UNUSED(ap);
 	UNUSED(option);
 #endif
 
 	return LIBUSB_ERROR_NOT_SUPPORTED;
 }
+
+#ifdef __ANDROID__
+
+static int android_scan_devices(struct libusb_context *ctx)
+{
+    /* Access and use the Android API via jni_env */
+
+    // NOTE/TODO: USB_HOST support could be detected with PackageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST) to fail fast if missing
+
+    // ActivityThread activityThread = ActivityThread.currentActivityThread();
+    jclass ActivityThread = (*jni_env)->FindClass(jni_env, "android/app/ActivityThread");
+    jobject activityThread = (*jni_env)->CallStaticObjectMethod(
+        jni_env,
+        ActivityThread,
+        (*jni_env)->GetStaticMethodID(
+            jni_env,
+            ActivityThread,
+            "currentActivityThread",
+            "()Landroid/app/ActivityThread;"
+        )
+    );
+
+    // Application context = activityThread.getApplication();
+    jobject context = (*jni_env)->CallObjectMethod(
+        jni_env,
+        activityThread,
+        (*jni_env)->GetMethodID(
+            jni_env,
+            ActivityThread,
+            "getApplication",
+            "()Landroid/app/Application;"
+        )
+    );
+    
+    // Object usbManager = context.getSystemService(Context.USB_SERVICE);
+    //jclass Context = (*jni_env)->GetObjectClass(jni_env, context);
+    jclass Context = (*jni_env)->FindClass(jni_env, "android/content/Context");
+    jobject usbManager = (*jni_env)->CallObjectMethod(
+        jni_env,
+        context,
+        (*jni_env)->GetMethodID(
+            jni_env,
+            Context,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;"
+        ),
+        (*jni_env)->GetStaticObjectField(
+            jni_env,
+            Context,
+            (*jni_env)->GetStaticFieldID(
+                jni_env,
+                Context,
+                "USB_SERVICE",
+                "Ljava/lang/String;"
+            )
+        )
+    );
+
+    // HashMap<String, UsbDevice> deviceMap = usbManager.getDeviceList();
+    jclass UsbManager = (*jni_env)->GetObjectClass(jni_env, usbManager);
+    jobject deviceMap = (*jni_env)->CallObjectMethod(
+        jni_env,
+        usbManager,
+        (*jni_env)->GetMethodID(
+            jni_env,
+            UsbManager,
+            "getDeviceList",
+            "()Ljava/util/HashMap;"
+        )
+    );
+
+    // Set<Map.Entry<String, UsbDevice>> deviceEntrySet = deviceMap.entrySet();
+    jclass HashMap = (*jni_env)->GetObjectClass(jni_env, deviceMap);
+    jobject deviceEntrySet = (*jni_env)->CallObjectMethod(
+        jni_env,
+        deviceMap,
+        (*jni_env)->GetMethodID(
+            jni_env,
+            HashMap,
+            "entrySet",
+            "()Ljava/util/Set;"
+        )
+    );
+
+    // Iterator<Map.Entry<String, UsbDevice>> deviceEntryIterator = deviceEntrySet.iterator();
+    jclass Set = (*jni_env)->GetObjectClass(jni_env, deviceEntrySet);
+    jobject deviceEntryIterator = (*jni_env)->CallObjectMethod(
+        jni_env,
+        deviceEntrySet,
+        (*jni_env)->GetMethodID(
+            jni_env,
+            Set,
+            "iterator",
+            "()Ljava/util/Iterator;"
+        )
+    );
+
+    // while (deviceEntryIterator.hasNext()) { }
+    jclass Iterator = (*jni_env)->GetObjectClass(jni_env, deviceEntryIterator);
+    jmethodID Iterator_hasNext = (*jni_env)->GetMethodID(
+        jni_env,
+        Iterator,
+        "hasNext",
+        "()Z"
+    );
+    jmethodID Iterator_next = (*jni_env)->GetMethodID(
+        jni_env,
+        Iterator,
+        "next",
+        "()Ljava/lang/Object;"
+    );
+    jclass Entry = (*jni_env)->FindClass(jni_env, "java/util/Map$Entry");
+    jmethodID Entry_getKey = (*jni_env)->GetMethodID(
+        jni_env,
+        Entry,
+        "getKey",
+        "()Ljava/lang/Object;"
+    );
+    jmethodID Entry_getValue = (*jni_env)->GetMethodID(
+        jni_env,
+        Entry,
+        "getValue",
+        "()Ljava/lang/Object;"
+    );
+    jclass UsbDevice = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDevice");
+    jmethodID UsbDevice_getDeviceId = (*jni_env)->GetMethodID(
+        jni_env,
+        UsbDevice,
+        "getDeviceId",
+        "()I"
+    );
+
+    // requesting permission may require subclassing BroadcastReceiver to handle the reply.
+    /*
+    jmethodID UsbManager_requestPermission = (*jni_env)->GetMethodID(
+        jni_env,
+        UsbManager,
+        "requestPermission",
+        "(Landroid/hardware/usb/UsbDevice;Landroid/app/PendingIntent;)V"
+    );
+    */
+
+    usbi_dbg("enumerating android usb devices");
+
+    while ((*jni_env)->CallBooleanMethod(jni_env, deviceEntryIterator, Iterator_hasNext)) {
+
+        // Map.Entry<String, UsbDevice> deviceEntry = deviceEntryIterator.next();
+        jobject deviceEntry = (*jni_env)->CallObjectMethod(
+            jni_env,
+            deviceEntryIterator,
+            Iterator_next
+        );
+
+        // String path = deviceEntry.getKey();
+        jstring path = (jstring)(*jni_env)->CallObjectMethod(
+            jni_env,
+            deviceEntry,
+            Entry_getKey
+        );
+
+        // UsbDevice deviceobj = deviceEntry.getValue();
+        jobject deviceobj = (*jni_env)->CallObjectMethod(
+            jni_env,
+            deviceEntry,
+            Entry_getValue
+        );
+
+        // int deviceid = deviceobj.getDeviceId();
+        uint16_t deviceid = (*jni_env)->CallIntMethod(
+            jni_env,
+            deviceobj,
+            UsbDevice_getDeviceId
+        );
+
+        /* on implementor's test system, path is usually "/dev/bus/usb/001/002"
+         * which could be used to calculate bus/dev numbers
+         */
+        char const * pathstr = (*jni_env)->GetStringUTFChars(jni_env, path, NULL);
+        usbi_dbg("android usb device: %s", pathstr);
+
+        /* The format for deviceid has always defaulted to bus * 1000 + dev, but I imagine a vendor can change this.
+         * https://android.googlesource.com/platform/system/core/+/master/libusbhost/usbhost.c
+         */
+        uint8_t dev = deviceid % 1000;
+        uint8_t bus = deviceid / 1000;
+        if (linux_enumerate_device(ctx, bus, dev, NULL, deviceobj)) {
+            usbi_dbg("failed to enumerate android device %s", pathstr);
+        }
+
+        (*jni_env)->ReleaseStringUTFChars(jni_env, path, pathstr);
+        (*jni_env)->DeleteLocalRef(jni_env, deviceobj);
+        (*jni_env)->DeleteLocalRef(jni_env, path);
+        (*jni_env)->DeleteLocalRef(jni_env, deviceEntry);
+    }
+    
+	return LIBUSB_SUCCESS;
+}
+
+#endif
 
 static int linux_scan_devices(struct libusb_context *ctx)
 {
@@ -585,7 +801,7 @@ static int sysfs_scan_device(struct libusb_context *ctx, const char *devname)
 	if (ret != LIBUSB_SUCCESS)
 		return ret;
 
-	return linux_enumerate_device(ctx, busnum, devaddr, devname);
+	return linux_enumerate_device(ctx, busnum, devaddr, devname, NULL);
 }
 
 /* read the bConfigurationValue for a device */
@@ -915,7 +1131,7 @@ static enum libusb_speed usbfs_get_speed(struct libusb_context *ctx, int fd)
 }
 
 static int initialize_device(struct libusb_device *dev, uint8_t busnum,
-	uint8_t devaddr, const char *sysfs_dir, int wrapped_fd)
+	uint8_t devaddr, const char *sysfs_dir, int wrapped_fd, void * platform_ptr)
 {
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
 	struct libusb_context *ctx = DEVICE_CTX(dev);
@@ -946,9 +1162,15 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 		}
 	} else if (wrapped_fd >= 0) {
 		dev->speed = usbfs_get_speed(ctx, wrapped_fd);
-	}
+    }
 
 	/* cache descriptors in memory */
+    #ifdef __ANDROID__
+    if (platform_ptr != NULL) {
+        // TODO: parse configurations
+        return LIBUSB_SUCCESS;
+    }
+    #endif
 	if (sysfs_dir) {
 		fd = open_sysfs_attr(ctx, sysfs_dir, "descriptors");
 	} else if (wrapped_fd < 0) {
@@ -1104,7 +1326,7 @@ retry:
 }
 
 int linux_enumerate_device(struct libusb_context *ctx,
-	uint8_t busnum, uint8_t devaddr, const char *sysfs_dir)
+	uint8_t busnum, uint8_t devaddr, const char *sysfs_dir, void * platform_ptr)
 {
 	unsigned long session_id;
 	struct libusb_device *dev;
@@ -1130,7 +1352,7 @@ int linux_enumerate_device(struct libusb_context *ctx,
 	if (!dev)
 		return LIBUSB_ERROR_NO_MEM;
 
-	r = initialize_device(dev, busnum, devaddr, sysfs_dir, -1);
+	r = initialize_device(dev, busnum, devaddr, sysfs_dir, -1, platform_ptr);
 	if (r < 0)
 		goto out;
 	r = usbi_sanitize_device(dev);
@@ -1155,7 +1377,7 @@ void linux_hotplug_enumerate(uint8_t busnum, uint8_t devaddr, const char *sys_na
 
 	usbi_mutex_static_lock(&active_contexts_lock);
 	for_each_context(ctx) {
-		linux_enumerate_device(ctx, busnum, devaddr, sys_name);
+		linux_enumerate_device(ctx, busnum, devaddr, sys_name, NULL);
 	}
 	usbi_mutex_static_unlock(&active_contexts_lock);
 }
@@ -1225,7 +1447,7 @@ static int usbfs_scan_busdir(struct libusb_context *ctx, uint8_t busnum)
 			continue;
 		}
 
-		if (linux_enumerate_device(ctx, busnum, devaddr, NULL)) {
+		if (linux_enumerate_device(ctx, busnum, devaddr, NULL, NULL)) {
 			usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
 			continue;
 		}
@@ -1262,7 +1484,7 @@ static int usbfs_get_device_list(struct libusb_context *ctx)
 			if (!is_usbdev_entry(entry->d_name, &busnum, &devaddr))
 				continue;
 
-			r = linux_enumerate_device(ctx, busnum, devaddr, NULL);
+			r = linux_enumerate_device(ctx, busnum, devaddr, NULL, NULL);
 			if (r < 0) {
 				usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
 				continue;
@@ -1383,7 +1605,7 @@ static int op_wrap_sys_device(struct libusb_context *ctx,
 	if (!dev)
 		return LIBUSB_ERROR_NO_MEM;
 
-	r = initialize_device(dev, busnum, devaddr, NULL, fd);
+	r = initialize_device(dev, busnum, devaddr, NULL, fd, NULL);
 	if (r < 0)
 		goto out;
 	r = usbi_sanitize_device(dev);
