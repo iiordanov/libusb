@@ -680,6 +680,11 @@ static int android_scan_devices(struct libusb_context *ctx)
 
 static int android_jni_add_string_descriptor(struct linux_device_priv *priv, int *next_string, jstring jstr)
 {
+    if ((*jni_env)->IsSameObject(jni_env, jstr, NULL) ) {
+        return 0;
+    }
+
+    /*
     const uint16_t * str = (*jni_env)->GetStringChars(jni_env, jstr, NULL);
     int str_len = (*jni_env)->GetStringLength(jni_env, jstr) * sizeof(str[0]);
     int alloc_len  = priv->descriptors_len + 2 + str_len;
@@ -698,22 +703,24 @@ static int android_jni_add_string_descriptor(struct linux_device_priv *priv, int
 
     priv->descriptors_len = alloc_len;
     (*jni_env)->ReleaseStringChars(jni_env, jstr, str);
-    next_string ++;
+    */
 
-    return LIBUSB_SUCCESS;
+    *next_string ++;
+
+    return *next_string;
 }
 
 static int android_jni_add_endpoint_descriptor(struct linux_device_priv *priv, uint8_t *bMaxPacketSize0, jobject endpoint)
 {
     jclass UsbEndpoint = (*jni_env)->GetObjectClass(jni_env, endpoint);
 
-    int alloc_len = priv->descriptors_len + LIBUSB_DT_ENDPOINT_SIZE;
-    priv->descriptors = usbi_reallocf(priv->descriptors, alloc_len);
+    int endpoint_offset = priv->descriptors_len;
+    priv->descriptors_len = endpoint_offset + LIBUSB_DT_ENDPOINT_SIZE;
+    priv->descriptors = usbi_reallocf(priv->descriptors, priv->descriptors_len);
     if (!priv->descriptors) {
         return LIBUSB_ERROR_NO_MEM;
     }
-    struct usbi_endpoint_descriptor *endpoint_desc = (struct usbi_endpoint_descriptor *)((uint8_t*)priv->descriptors + priv->descriptors_len);
-    *endpoint_desc = (struct usbi_endpoint_descriptor){
+    struct usbi_endpoint_descriptor endpoint_desc = {
         .bLength = LIBUSB_DT_ENDPOINT_SIZE,
         .bDescriptorType = LIBUSB_DT_ENDPOINT,
         .bEndpointAddress = (*jni_env)->CallIntMethod(jni_env, endpoint,
@@ -749,10 +756,10 @@ static int android_jni_add_endpoint_descriptor(struct linux_device_priv *priv, u
             )
         )
     };
-    priv->descriptors_len = alloc_len;
+    *(struct usbi_endpoint_descriptor *)((uint8_t*)priv->descriptors + endpoint_offset) = endpoint_desc;
 
     if (bMaxPacketSize0 != NULL) {
-        *bMaxPacketSize0 = endpoint_desc->wMaxPacketSize;
+        *bMaxPacketSize0 = endpoint_desc.wMaxPacketSize;
     }
     
     return LIBUSB_SUCCESS;
@@ -772,14 +779,16 @@ static int android_jni_add_interface_descriptor(struct linux_device_priv *priv, 
         )
     );
 
-    int alloc_len = priv->descriptors_len + LIBUSB_DT_INTERFACE_SIZE;
-    priv->descriptors = usbi_reallocf(priv->descriptors, alloc_len);
+    int interface_offset = priv->descriptors_len;
+    priv->descriptors_len = interface_offset + LIBUSB_DT_INTERFACE_SIZE;
+    priv->descriptors = usbi_reallocf(priv->descriptors, priv->descriptors_len);
     if (!priv->descriptors) {
         return LIBUSB_ERROR_NO_MEM;
     }
 
-    struct usbi_interface_descriptor *interface_desc = (struct usbi_interface_descriptor *)((uint8_t*)priv->descriptors + priv->descriptors_len);
-    *interface_desc = (struct usbi_interface_descriptor) {
+    usbi_dbg("making interface descriptor from android jni");
+
+    struct usbi_interface_descriptor interface_desc = {
         .bLength = LIBUSB_DT_INTERFACE_SIZE,
         .bDescriptorType = LIBUSB_DT_INTERFACE,
         .bInterfaceNumber =  (*jni_env)->CallIntMethod(jni_env, interface,
@@ -823,20 +832,24 @@ static int android_jni_add_interface_descriptor(struct linux_device_priv *priv, 
                 "()I"
             )
         ),
-        .iInterface = *next_string,
-    };
-    priv->descriptors_len = alloc_len;
-
-    android_jni_add_string_descriptor(priv, next_string,
-        (*jni_env)->CallObjectMethod(jni_env, interface,
-            (*jni_env)->GetMethodID(
+        .iInterface = android_jni_add_string_descriptor(priv, next_string,
+            (*jni_env)->CallObjectMethod(
                 jni_env,
-                UsbInterface,
-                "getName",
-                "()Ljava/lang/String;"
+                interface,
+                (*jni_env)->GetMethodID(
+                    jni_env,
+                    UsbInterface,
+                    "getName",
+                    "()Ljava/lang/String;"
+                )
             )
         )
-    );
+    };
+    if (interface_desc.iInterface < 0) {
+        return interface_desc.iInterface;
+    }
+    *(struct usbi_interface_descriptor *)((uint8_t*)priv->descriptors + interface_offset) = interface_desc;
+
 
     for (int k = 0; k < numEndpoints; k ++) {
         // UsbEndpoint endpoint = interface.getEndpoint(k);
@@ -853,6 +866,9 @@ static int android_jni_add_interface_descriptor(struct linux_device_priv *priv, 
         );
 
         int r = android_jni_add_endpoint_descriptor(priv, bMaxPacketSize0, endpoint);
+
+        (*jni_env)->DeleteLocalRef(jni_env, endpoint);
+
         if (r != LIBUSB_SUCCESS) {
             return r;
         }
@@ -875,14 +891,16 @@ static int android_jni_add_configuration_descriptor(struct linux_device_priv *pr
         )
     );
 
-    int alloc_len = priv->descriptors_len + LIBUSB_DT_CONFIG_SIZE;
-    priv->descriptors = usbi_reallocf(priv->descriptors, alloc_len);
+    int config_offset = priv->descriptors_len;
+    priv->descriptors_len = config_offset + LIBUSB_DT_CONFIG_SIZE;
+    priv->descriptors = usbi_reallocf(priv->descriptors, priv->descriptors_len);
     if (!priv->descriptors) {
         return LIBUSB_ERROR_NO_MEM;
     }
-    int config_offset = priv->descriptors_len;
-    struct usbi_configuration_descriptor *config_desc = (struct usbi_configuration_descriptor *)((uint8_t*)priv->descriptors + config_offset);
-    *config_desc = (struct usbi_configuration_descriptor){
+
+    usbi_dbg("making configuration descriptor from android jni");
+
+    struct usbi_configuration_descriptor config_desc = {
         .bLength = LIBUSB_DT_CONFIG_SIZE,
         .bDescriptorType = LIBUSB_DT_CONFIG,
         .wTotalLength = 0, // assigned below
@@ -895,7 +913,16 @@ static int android_jni_add_configuration_descriptor(struct linux_device_priv *pr
                 "()I"
             )
         ),
-        .iConfiguration = *next_string,
+        .iConfiguration = android_jni_add_string_descriptor(priv, next_string,
+            (*jni_env)->CallObjectMethod(jni_env, config,
+                (*jni_env)->GetMethodID(
+                    jni_env,
+                    UsbConfiguration,
+                    "getName",
+                    "()Ljava/lang/String;"
+                )
+            )
+        ),
         .bmAttributes = 0x80 | ((*jni_env)->CallBooleanMethod(jni_env, config,
             (*jni_env)->GetMethodID(
                 jni_env,
@@ -920,18 +947,9 @@ static int android_jni_add_configuration_descriptor(struct linux_device_priv *pr
             )
         )
     };
-    priv->descriptors_len = alloc_len;
-
-    android_jni_add_string_descriptor(priv, next_string,
-        (*jni_env)->CallObjectMethod(jni_env, config,
-            (*jni_env)->GetMethodID(
-                jni_env,
-                UsbConfiguration,
-                "getName",
-                "()Ljava/lang/String;"
-            )
-        )
-    );
+    if (config_desc.iConfiguration < 0) {
+        return config_desc.iConfiguration;
+    }
 
     for (int j = 0; j < numInterfaces; ++ j) {
         // UsbInterface interface = config.getInterface(j)
@@ -948,24 +966,27 @@ static int android_jni_add_configuration_descriptor(struct linux_device_priv *pr
         );
 
         int r = android_jni_add_interface_descriptor(priv, bMaxPacketSize0, next_string, interface);
+
+        (*jni_env)->DeleteLocalRef(jni_env, interface);
+
         if (r != LIBUSB_SUCCESS) {
             return r;
         }
         bMaxPacketSize0 = NULL;
     }
     
-    config_desc = (struct usbi_configuration_descriptor *)((uint8_t*)priv->descriptors + config_offset);
-    config_desc->wTotalLength = priv->descriptors_len - config_offset;
+    config_desc.wTotalLength = priv->descriptors_len - config_offset;
+    *(struct usbi_configuration_descriptor *)((uint8_t*)priv->descriptors + config_offset) = config_desc;
 
     return LIBUSB_SUCCESS;
 }
 
 static int android_jni_add_device_descriptors(struct linux_device_priv *priv, jobject deviceobj)
 {
-    // Ideally the results of all these jni calls throughout the file, to get
-    // class and method references, would be cached and reused.  They are slow.
-    // Most of them could be made static scope and performed in the option
-    // handler.
+    // Ideally the results of all these jni calls throughout this file, to get
+    // class objects and method ids, would be cached and reused.  They are
+    // slow.  Most of the results could be made static scope and the calls
+    // performed in the option handler.
 
     // int numConfigurations = deviceobj.getConfigurationCount();
     jclass UsbDevice = (*jni_env)->GetObjectClass(jni_env, deviceobj);
@@ -980,15 +1001,17 @@ static int android_jni_add_device_descriptors(struct linux_device_priv *priv, jo
         )
     );
     int r;
+    int next_string = 0;
 
-    int alloc_len = LIBUSB_DT_DEVICE_SIZE;
-    priv->descriptors = usbi_reallocf(priv->descriptors, alloc_len);
+    priv->descriptors_len = LIBUSB_DT_DEVICE_SIZE;
+    priv->descriptors = usbi_reallocf(priv->descriptors, priv->descriptors_len);
     if (!priv->descriptors) {
         return LIBUSB_ERROR_NO_MEM;
     }
 
-    struct usbi_device_descriptor * device_desc = priv->descriptors;
-    *device_desc = (struct usbi_device_descriptor){
+    usbi_dbg("making device descriptor from android jni");
+
+    struct usbi_device_descriptor device_desc = {
         .bLength = LIBUSB_DT_DEVICE_SIZE,
         .bDescriptorType = LIBUSB_DT_DEVICE,
         .bcdUSB = 0x0300,
@@ -1042,44 +1065,47 @@ static int android_jni_add_device_descriptors(struct linux_device_priv *priv, jo
             )
         ),*/ /* there might be a way to load descriptors directly, somehow.  at least a feature
                 request could be made to android: they parse the descriptors, and then this code recreates */
-        .iManufacturer = 0,
-        .iProduct = 1,
-        .iSerialNumber = 2,
+        .iManufacturer = android_jni_add_string_descriptor(priv, &next_string, 
+            (*jni_env)->CallObjectMethod(jni_env, deviceobj,
+                (*jni_env)->GetMethodID(
+                    jni_env,
+                    UsbDevice,
+                    "getManufacturerName",
+                    "()Ljava/lang/String;"
+                )
+            )
+        ),
+        .iProduct = android_jni_add_string_descriptor(priv, &next_string,
+            (*jni_env)->CallObjectMethod(jni_env, deviceobj,
+                (*jni_env)->GetMethodID(
+                    jni_env,
+                    UsbDevice,
+                    "getProductName",
+                    "()Ljava/lang/String;"
+                )
+            )
+        ),
+        .iSerialNumber = android_jni_add_string_descriptor(priv, &next_string,
+            (*jni_env)->CallObjectMethod(jni_env, deviceobj,
+                (*jni_env)->GetMethodID(
+                    jni_env,
+                    UsbDevice,
+                    "getSerialNumber",
+                    "()Ljava/lang/String;"
+                )
+            )
+        ),
         .bNumConfigurations = numConfigurations,
     };
-    priv->descriptors_len = alloc_len;
-
-    int next_string = 0;
-    android_jni_add_string_descriptor(priv, &next_string, 
-        (*jni_env)->CallObjectMethod(jni_env, deviceobj,
-            (*jni_env)->GetMethodID(
-                jni_env,
-                UsbDevice,
-                "getManufacturerName",
-                "()Ljava/lang/String;"
-            )
-        )
-    );
-    android_jni_add_string_descriptor(priv, &next_string,
-        (*jni_env)->CallObjectMethod(jni_env, deviceobj,
-            (*jni_env)->GetMethodID(
-                jni_env,
-                UsbDevice,
-                "getProductName",
-                "()Ljava/lang/String;"
-            )
-        )
-    );
-    android_jni_add_string_descriptor(priv, &next_string,
-        (*jni_env)->CallObjectMethod(jni_env, deviceobj,
-            (*jni_env)->GetMethodID(
-                jni_env,
-                UsbDevice,
-                "getSerialNumber",
-                "()Ljava/lang/String;"
-            )
-        )
-    );
+    if (device_desc.iManufacturer < 0) {
+        return device_desc.iManufacturer;
+    }
+    if (device_desc.iProduct < 0) {
+        return device_desc.iProduct;
+    }
+    if (device_desc.iSerialNumber < 0) {
+        return device_desc.iSerialNumber;
+    }
 
     uint8_t bMaxPacketSize0 = 0;
     for (int i = 0; i < numConfigurations; i ++) {
@@ -1096,16 +1122,14 @@ static int android_jni_add_device_descriptors(struct linux_device_priv *priv, jo
             i
         );
         r = android_jni_add_configuration_descriptor(priv, &bMaxPacketSize0, &next_string, config);
+        (*jni_env)->DeleteLocalRef(jni_env, config);
         if (r != LIBUSB_SUCCESS) {
             return r;
         }
     }
 
-    device_desc = priv->descriptors;
-    if (bMaxPacketSize0 > 255) {
-        bMaxPacketSize0 = 255;
-    }
-    device_desc->bMaxPacketSize0 = bMaxPacketSize0;
+    device_desc.bMaxPacketSize0 = bMaxPacketSize0 > 255 ? 255 : bMaxPacketSize0;
+    *(struct usbi_device_descriptor *)priv->descriptors = device_desc;
 
     return LIBUSB_SUCCESS;
 }
@@ -1599,8 +1623,13 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 	/* cache descriptors in memory */
 	if (sysfs_dir) {
 		fd = open_sysfs_attr(ctx, sysfs_dir, "descriptors");
-	} else if (wrapped_fd < 0) {
-		fd = get_usbfs_fd(dev, O_RDONLY, 0);
+	} else if (wrapped_fd >= 0) {
+		fd = wrapped_fd;
+		r = lseek(fd, 0, SEEK_SET);
+		if (r < 0) {
+			usbi_err(ctx, "lseek failed, errno=%d", errno);
+			return LIBUSB_ERROR_IO;
+		}
     #ifdef __ANDROID__
     } else if (platform_ptr != NULL && jni_env != NULL) {
         r = android_jni_add_device_descriptors(priv, platform_ptr);
@@ -1611,12 +1640,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
         skip_fd = 1;
     #endif
 	} else {
-		fd = wrapped_fd;
-		r = lseek(fd, 0, SEEK_SET);
-		if (r < 0) {
-			usbi_err(ctx, "lseek failed, errno=%d", errno);
-			return LIBUSB_ERROR_IO;
-		}
+		fd = get_usbfs_fd(dev, O_RDONLY, 0);
 	}
     if (!skip_fd) {
     	if (fd < 0)
