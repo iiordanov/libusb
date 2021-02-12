@@ -1826,6 +1826,8 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
         }
         fd = -1;
         skip_fd = 1;
+    #else
+        (void)platform_ptr;
     #endif
 	} else {
 		fd = get_usbfs_fd(dev, O_RDONLY, 0);
