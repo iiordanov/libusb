@@ -120,6 +120,10 @@ typedef atomic_long usbi_atomic_t;
 #include "os/threads_windows.h"
 #endif
 
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
+
 /* Inside the libusb code, mark all public functions as follows:
  *   return_type API_EXPORTED function_name(params) { ... }
  * But if the function returns a pointer, mark it as follows:
@@ -353,6 +357,10 @@ struct libusb_context {
 	/* used for timeout handling, if supported by OS.
 	 * this timer is maintained to trigger on the next pending timeout */
 	usbi_timer_t timer;
+#endif
+
+#ifdef __ANDROID__
+	JavaVM *android_javavm;
 #endif
 
 	struct list_head usb_devs;
