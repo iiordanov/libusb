@@ -100,7 +100,7 @@ static int init_count = 0;
 /* have no authority to operate usb device directly */
 static int weak_authority = 0;
 
-/* user-provided JavaVM to use instead of whatever is running */
+/* user-provided JavaVM to use */
 JavaVM *android_default_javavm = NULL;
 
 static int android_jni_scan_devices(struct libusb_context *ctx);
@@ -486,6 +486,10 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
 		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
 		usbi_dbg("got jnienv pointer: %p", jni_env);
+		if (jni_env == NULL) {
+			android_default_javavm = NULL;
+			return LIBUSB_SUCCESS;
+		}
 		int r = (*jni_env)->GetJavaVM(jni_env, &android_default_javavm);
 		usbi_dbg("got javavm pointer: %p", android_default_javavm);
 		if (r == JNI_OK)
