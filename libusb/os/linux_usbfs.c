@@ -739,39 +739,7 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 				"<init>",
 				"(Ljava/lang/String;)V"
 			),
-			(*jni_env)->GetStaticObjectField(
-				jni_env,
-				UsbManager,
-				(*jni_env)->GetStaticFieldID(
-					jni_env,
-					UsbManager,
-					"ACTION_USB_DEVICE_ATTACHED",
-					"Ljava/lang/String;"
-				)
-			)
-		);
-	
-		// intent.putExtra(UsbManager.EXTRA_DEVICE, device)
-		(*jni_env)->CallObjectMethod(
-			jni_env,
-			intent,
-			(*jni_env)->GetMethodID(
-				jni_env,
-				Intent,
-				"putExtra",
-			 "(Ljava/lang/String;Landroid/os/Parcelable;)Landroid/content/Intent;"
-			),
-			(*jni_env)->GetStaticObjectField(
-				jni_env,
-				UsbManager,
-				(*jni_env)->GetStaticFieldID(
-					jni_env,
-					UsbManager,
-					"EXTRA_DEVICE",
-					"Ljava/lang/String;"
-				)
-			),
-			device
+			(*jni_env)->NewStringUTF(jni_env, "libusb.android.USB_PERMISSION")
 		);
 		
 		// PendingIntent permissionIntent = PendingIntent.getBroadcast(context, 0, intent, 0);
