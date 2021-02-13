@@ -538,7 +538,7 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 	/* Access and use the Android API via jni_env */
 	
 	JNIEnv *jni_env;
-	int r = (*ctx->android_javavm)->GetEnv(ctx->android_javavm, (void**)&jni_env, JNI_VERSION_1_6);
+	int r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, (void**)&jni_env, NULL);
 	if (r != JNI_OK)
 		// probably means no environment on this thread yet; could attach the vm to the thread here to handle
 		return LIBUSB_ERROR_OTHER;
@@ -741,7 +741,7 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 static int android_jni_connect(struct libusb_device_handle *handle)
 {
 	JNIEnv *jni_env;
-	int r = (*handle->dev->ctx->android_javavm)->GetEnv(handle->dev->ctx->android_javavm, (void**)&jni_env, JNI_VERSION_1_6);
+	int r = (*handle->dev->ctx->android_javavm)->AttachCurrentThread(handle->dev->ctx->android_javavm, (void**)&jni_env, NULL);
 	if (r != JNI_OK)
 		return LIBUSB_ERROR_OTHER;
 
@@ -873,7 +873,7 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 static void android_jni_disconnect(struct libusb_device_handle *dev_handle)
 {
 	JNIEnv *jni_env;
-	int r = (*dev_handle->dev->ctx->android_javavm)->GetEnv(dev_handle->dev->ctx->android_javavm, (void**)&jni_env, JNI_VERSION_1_6);
+	int r = (*dev_handle->dev->ctx->android_javavm)->AttachCurrentThread(dev_handle->dev->ctx->android_javavm, (void**)&jni_env, NULL);
 	if (r != JNI_OK) {
 		usbi_dbg("failed to get jni_env");
 		return;
@@ -1857,7 +1857,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 #ifdef __ANDROID__
 	} else if (platform_ptr != NULL) {
 		JNIEnv *jni_env;
-		r = (*ctx->android_javavm)->GetEnv(ctx->android_javavm, (void**)&jni_env, JNI_VERSION_1_6);
+		r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, (void**)&jni_env, NULL);
 		if (r != JNI_OK)
 			return LIBUSB_ERROR_OTHER;
 		priv->android_jni = (*jni_env)->NewGlobalRef(jni_env, platform_ptr);
@@ -2786,7 +2786,7 @@ static void op_destroy_device(struct libusb_device *dev)
 	if (priv->android_jni != NULL) {
 		if (dev->ctx->android_javavm != NULL) {
 			JNIEnv *jni_env;
-			int r = (*dev->ctx->android_javavm)->GetEnv(dev->ctx->android_javavm, (void**)&jni_env, JNI_VERSION_1_6);
+			int r = (*dev->ctx->android_javavm)->AttachCurrentThread(dev->ctx->android_javavm, (void**)&jni_env, NULL);
 			if (r == JNI_OK)
 				(*jni_env)->DeleteGlobalRef(jni_env, priv->android_jni);
 		}
