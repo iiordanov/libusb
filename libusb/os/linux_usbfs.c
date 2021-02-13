@@ -1193,6 +1193,31 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 		return LIBUSB_ERROR_NO_MEM;
 	}
 
+	// parse binary coded decimal version
+	int version;
+	{
+		jstring versionjstr = (*jni_env)->CallObjectMethod(jni_env, device,
+			(*jni_env)->GetMethodID(
+				jni_env,
+				UsbDevice,
+				"getVersion",
+				"()Ljava/lang/String;"
+			)
+		);
+		const char * versionstr = (*jni_env)->GetStringUTFChars(jni_env, versionjstr, NULL);
+		char * subversion;
+		int tens, ones, tenths, hundredths;
+		ones = strtoul(versionstr, &subversion, 10);
+		tens = ones / 10;
+		ones = ones % 10;
+		hundredths = strtoul(subversion + 1, NULL, 10);
+		tenths = hundredths / 10;
+		hundredths = hundredths % 10;
+		(*jni_env)->ReleaseStringUTFChars(jni_env, versionjstr, versionstr);
+
+		version = hundredths | (tenths << 4) | (ones << 8) | (tens << 12);
+	}
+
 	struct usbi_device_descriptor device_desc = {
 		.bLength = LIBUSB_DT_DEVICE_SIZE,
 		.bDescriptorType = LIBUSB_DT_DEVICE,
@@ -1238,14 +1263,7 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 				"()I"
 			)
 		),
-		.bcdDevice = 0, /* TODO: getVersion() returns a String (*jni_env)->CallIntMethod(jni_env, device,
-			(*jni_env)->GetMethodID(
-				jni_env,
-				UsbDevice,
-				"getVersion",
-				"()Ljava/util/string;"
-			)
-		),*/ /* TODO: raw descriptors are available after connection, so these are only needed for enumeration */
+		.bcdDevice = version,
 		.iManufacturer = android_jni_add_string_descriptor(jni_env, priv, &next_string, 
 			(*jni_env)->CallObjectMethod(jni_env, device,
 				(*jni_env)->GetMethodID(
