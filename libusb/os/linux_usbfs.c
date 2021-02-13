@@ -471,23 +471,22 @@ static void op_exit(struct libusb_context *ctx)
 static int op_set_option(struct libusb_context *ctx, enum libusb_option option, va_list ap)
 {
 	UNUSED(ctx);
-	usbi_dbg("op_set_option");
 
 #ifdef __ANDROID__
 	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
 		int parameter = va_arg(ap, int);
 		default_weak_authority = !parameter;
-		usbi_dbg("set libusb has weak authority: %d", parameter);
+		usbi_dbg("set libusb has weak authority: %d", default_weak_authority);
 		return LIBUSB_SUCCESS;
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
 		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
-		usbi_dbg("got jnienv pointer: %p", jni_env);
-		if (jni_env == NULL) {
+		int r = JNI_OK;
+		if (jni_env != NULL) {
+			r = (*jni_env)->GetJavaVM(jni_env, &android_default_javavm);
+		} else {
 			android_default_javavm = NULL;
-			return LIBUSB_SUCCESS;
 		}
-		int r = (*jni_env)->GetJavaVM(jni_env, &android_default_javavm);
-		usbi_dbg("got javavm pointer: %p", android_default_javavm);
+		usbi_dbg("set default jnienv pointer %p javavm pointer %p", jni_env, android_default_javavm);
 		if (r == JNI_OK)
 			return LIBUSB_SUCCESS;
 		else
@@ -538,7 +537,7 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 	/* Access and use the Android API via jni_env */
 	
 	JNIEnv *jni_env;
-	int r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, (void**)&jni_env, NULL);
+	int r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK)
 		// probably means no environment on this thread yet; could attach the vm to the thread here to handle
 		return LIBUSB_ERROR_OTHER;
@@ -621,34 +620,34 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 		)
 	);
 
-	// Set<Map.Entry<String, UsbDevice>> deviceEntrySet = deviceMap.entrySet();
+	// Collection<UsbDevice> deviceCollection = deviceMap.values();
 	jclass HashMap = (*jni_env)->GetObjectClass(jni_env, deviceMap);
-	jobject deviceEntrySet = (*jni_env)->CallObjectMethod(
+	jobject deviceCollection = (*jni_env)->CallObjectMethod(
 		jni_env,
 		deviceMap,
 		(*jni_env)->GetMethodID(
 			jni_env,
 			HashMap,
-			"entrySet",
-			"()Ljava/util/Set;"
+			"values",
+			"()Ljava/util/Collection;"
 		)
 	);
 
-	// Iterator<Map.Entry<String, UsbDevice>> deviceEntryIterator = deviceEntrySet.iterator();
-	jclass Set = (*jni_env)->GetObjectClass(jni_env, deviceEntrySet);
-	jobject deviceEntryIterator = (*jni_env)->CallObjectMethod(
+	// Iterator<UsbDevice> deviceIterator = deviceCollection.iterator();
+	jclass Collection = (*jni_env)->GetObjectClass(jni_env, deviceCollection);
+	jobject deviceIterator = (*jni_env)->CallObjectMethod(
 		jni_env,
-		deviceEntrySet,
+		deviceCollection,
 		(*jni_env)->GetMethodID(
 			jni_env,
-			Set,
+			Collection,
 			"iterator",
 			"()Ljava/util/Iterator;"
 		)
 	);
 
 	// while (deviceEntryIterator.hasNext()) { }
-	jclass Iterator = (*jni_env)->GetObjectClass(jni_env, deviceEntryIterator);
+	jclass Iterator = (*jni_env)->GetObjectClass(jni_env, deviceIterator);
 	jmethodID Iterator_hasNext = (*jni_env)->GetMethodID(
 		jni_env,
 		Iterator,
@@ -661,19 +660,6 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 		"next",
 		"()Ljava/lang/Object;"
 	);
-	jclass Entry = (*jni_env)->FindClass(jni_env, "java/util/Map$Entry");
-	jmethodID Entry_getKey = (*jni_env)->GetMethodID(
-		jni_env,
-		Entry,
-		"getKey",
-		"()Ljava/lang/Object;"
-	);
-	jmethodID Entry_getValue = (*jni_env)->GetMethodID(
-		jni_env,
-		Entry,
-		"getValue",
-		"()Ljava/lang/Object;"
-	);
 	jclass UsbDevice = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDevice");
 	jmethodID UsbDevice_getDeviceId = (*jni_env)->GetMethodID(
 		jni_env,
@@ -682,57 +668,34 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 		"()I"
 	);
 
-	usbi_dbg("enumerating android usb devices");
+	usbi_dbg("enumerating usb devices using android api");
 
-	while ((*jni_env)->CallBooleanMethod(jni_env, deviceEntryIterator, Iterator_hasNext)) {
+	while ((*jni_env)->CallBooleanMethod(jni_env, deviceIterator, Iterator_hasNext)) {
 
-		// Map.Entry<String, UsbDevice> deviceEntry = deviceEntryIterator.next();
-		jobject deviceEntry = (*jni_env)->CallObjectMethod(
+		// UsbDevice device = deviceIterator.next();
+		jobject device = (*jni_env)->CallObjectMethod(
 			jni_env,
-			deviceEntryIterator,
+			deviceIterator,
 			Iterator_next
-		);
-
-		// String path = deviceEntry.getKey();
-		jstring path = (jstring)(*jni_env)->CallObjectMethod(
-			jni_env,
-			deviceEntry,
-			Entry_getKey
-		);
-
-		// UsbDevice device = deviceEntry.getValue();
-		jobject deviceobj = (*jni_env)->CallObjectMethod(
-			jni_env,
-			deviceEntry,
-			Entry_getValue
 		);
 
 		// int deviceid = deviceobj.getDeviceId();
 		uint16_t deviceid = (*jni_env)->CallIntMethod(
 			jni_env,
-			deviceobj,
+			device,
 			UsbDevice_getDeviceId
 		);
-
-		/* on implementor's test system, path is usually "/dev/bus/usb/001/002"
-		 * which could be used to calculate bus/dev numbers
-		 */
-		char const * pathstr = (*jni_env)->GetStringUTFChars(jni_env, path, NULL);
-		usbi_dbg("android usb device: %s", pathstr);
 
 		/* The format for deviceid has always defaulted to bus * 1000 + dev, but I imagine a vendor can change this.
 		 * https://android.googlesource.com/platform/system/core/+/master/libusbhost/usbhost.c
 		 */
 		uint8_t dev = deviceid % 1000;
 		uint8_t bus = deviceid / 1000;
-		if (linux_enumerate_device(ctx, bus, dev, NULL, deviceobj)) {
-			usbi_dbg("failed to enumerate android device %s", pathstr);
+		if (linux_enumerate_device(ctx, bus, dev, NULL, device)) {
+			usbi_dbg("failed to enumerate android device %d", deviceid);
 		}
 
-		(*jni_env)->ReleaseStringUTFChars(jni_env, path, pathstr);
-		(*jni_env)->DeleteLocalRef(jni_env, deviceobj);
-		(*jni_env)->DeleteLocalRef(jni_env, path);
-		(*jni_env)->DeleteLocalRef(jni_env, deviceEntry);
+		(*jni_env)->DeleteLocalRef(jni_env, device);
 	}
 	
 	return LIBUSB_SUCCESS;
@@ -741,7 +704,7 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 static int android_jni_connect(struct libusb_device_handle *handle)
 {
 	JNIEnv *jni_env;
-	int r = (*handle->dev->ctx->android_javavm)->AttachCurrentThread(handle->dev->ctx->android_javavm, (void**)&jni_env, NULL);
+	int r = (*handle->dev->ctx->android_javavm)->AttachCurrentThread(handle->dev->ctx->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK)
 		return LIBUSB_ERROR_OTHER;
 
@@ -873,7 +836,7 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 static void android_jni_disconnect(struct libusb_device_handle *dev_handle)
 {
 	JNIEnv *jni_env;
-	int r = (*dev_handle->dev->ctx->android_javavm)->AttachCurrentThread(dev_handle->dev->ctx->android_javavm, (void**)&jni_env, NULL);
+	int r = (*dev_handle->dev->ctx->android_javavm)->AttachCurrentThread(dev_handle->dev->ctx->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK) {
 		usbi_dbg("failed to get jni_env");
 		return;
@@ -1011,8 +974,6 @@ static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_de
 		return LIBUSB_ERROR_NO_MEM;
 	}
 
-	usbi_dbg("making interface descriptor from android jni");
-
 	struct usbi_interface_descriptor interface_desc = {
 		.bLength = LIBUSB_DT_INTERFACE_SIZE,
 		.bDescriptorType = LIBUSB_DT_INTERFACE,
@@ -1123,8 +1084,6 @@ static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linu
 		return LIBUSB_ERROR_NO_MEM;
 	}
 
-	usbi_dbg("making configuration descriptor from android jni");
-
 	struct usbi_configuration_descriptor config_desc = {
 		.bLength = LIBUSB_DT_CONFIG_SIZE,
 		.bDescriptorType = LIBUSB_DT_CONFIG,
@@ -1233,8 +1192,6 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 	if (!priv->descriptors) {
 		return LIBUSB_ERROR_NO_MEM;
 	}
-
-	usbi_dbg("making device descriptor from android jni");
 
 	struct usbi_device_descriptor device_desc = {
 		.bLength = LIBUSB_DT_DEVICE_SIZE,
@@ -1857,7 +1814,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 #ifdef __ANDROID__
 	} else if (platform_ptr != NULL) {
 		JNIEnv *jni_env;
-		r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, (void**)&jni_env, NULL);
+		r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, &jni_env, NULL);
 		if (r != JNI_OK)
 			return LIBUSB_ERROR_OTHER;
 		priv->android_jni = (*jni_env)->NewGlobalRef(jni_env, platform_ptr);
@@ -1868,7 +1825,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 		fd = -1;
 		skip_fd = 1;
 #else
-		(void)platform_ptr;
+		UNUSED(platform_ptr);
 #endif
 	} else {
 		fd = get_usbfs_fd(dev, O_RDONLY, 0);
@@ -2786,7 +2743,7 @@ static void op_destroy_device(struct libusb_device *dev)
 	if (priv->android_jni != NULL) {
 		if (dev->ctx->android_javavm != NULL) {
 			JNIEnv *jni_env;
-			int r = (*dev->ctx->android_javavm)->AttachCurrentThread(dev->ctx->android_javavm, (void**)&jni_env, NULL);
+			int r = (*dev->ctx->android_javavm)->AttachCurrentThread(dev->ctx->android_javavm, &jni_env, NULL);
 			if (r == JNI_OK)
 				(*jni_env)->DeleteGlobalRef(jni_env, priv->android_jni);
 		}
