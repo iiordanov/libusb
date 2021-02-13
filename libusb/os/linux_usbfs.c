@@ -137,7 +137,7 @@ struct linux_device_priv {
 	struct config_descriptor *config_descriptors;
 	int active_config; /* cache val for !sysfs_available  */
 #ifdef __ANDROID__
-	jobject android_jni;
+	jobject android_jni_device;
 #endif
 };
 
@@ -147,7 +147,7 @@ struct linux_device_handle_priv {
 	int fd_keep;
 	uint32_t caps;
 #ifdef __ANDROID__
-	jobject android_jni;
+	jobject android_jni_connection;
 #endif
 };
 
@@ -710,7 +710,7 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 
 	struct linux_device_priv *priv = usbi_get_device_priv(handle->dev);
 	struct linux_device_handle_priv *hpriv = usbi_get_device_handle_priv(handle);
-	jobject device = priv->android_jni;
+	jobject device = priv->android_jni_device;
 	jobject context = android_jni_context(jni_env);  
 
 	// Object usbManager = context.getSystemService(Context.USB_SERVICE);
@@ -827,7 +827,7 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 	// TODO: we can now fill the descriptors correctly using usbDeviceConnection.getRawDescriptors()
 
 	if (fd != -1) {
-		hpriv->android_jni = (*jni_env)->NewGlobalRef(jni_env, usbDeviceConnection);
+		hpriv->android_jni_connection = (*jni_env)->NewGlobalRef(jni_env, usbDeviceConnection);
 	}
 
 	return fd;
@@ -843,7 +843,7 @@ static void android_jni_disconnect(struct libusb_device_handle *dev_handle)
 	}
 
 	struct linux_device_handle_priv *hpriv = usbi_get_device_handle_priv(dev_handle);
-	jobject usbDeviceConnection = hpriv->android_jni;
+	jobject usbDeviceConnection = hpriv->android_jni_connection;
 
 	// usbDeviceConnection.close();
 	jclass UsbDeviceConnection = (*jni_env)->GetObjectClass(jni_env, usbDeviceConnection);
@@ -1835,7 +1835,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 		r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, &jni_env, NULL);
 		if (r != JNI_OK)
 			return LIBUSB_ERROR_OTHER;
-		priv->android_jni = (*jni_env)->NewGlobalRef(jni_env, platform_ptr);
+		priv->android_jni_device = (*jni_env)->NewGlobalRef(jni_env, platform_ptr);
 		r = android_jni_add_device_descriptors(jni_env, priv, platform_ptr);
 		if (r < 0) {
 			return r;
@@ -2335,7 +2335,7 @@ static void op_close(struct libusb_device_handle *dev_handle)
 	if (!hpriv->fd_keep)
 		close(hpriv->fd);
 #ifdef __ANDROID__
-	if (hpriv->android_jni != NULL)
+	if (hpriv->android_jni_connection != NULL)
 		android_jni_disconnect(dev_handle);
 #endif
 }
@@ -2758,12 +2758,12 @@ static void op_destroy_device(struct libusb_device *dev)
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
 
 #ifdef __ANDROID__
-	if (priv->android_jni != NULL) {
+	if (priv->android_jni_device != NULL) {
 		if (dev->ctx->android_javavm != NULL) {
 			JNIEnv *jni_env;
 			int r = (*dev->ctx->android_javavm)->AttachCurrentThread(dev->ctx->android_javavm, &jni_env, NULL);
 			if (r == JNI_OK)
-				(*jni_env)->DeleteGlobalRef(jni_env, priv->android_jni);
+				(*jni_env)->DeleteGlobalRef(jni_env, priv->android_jni_device);
 		}
 	}
 #endif

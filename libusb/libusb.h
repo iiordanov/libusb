@@ -2108,8 +2108,8 @@ enum libusb_option {
 
 	/** Provide a JNIEnv* pointer for libusb to use on Android.  If this
 	 * pointer is nonzero, the Android SDK will be used for backend
-	 * functions that * would otherwise require additional Java code to
-	 * ask for permissions.
+	 * functions that would otherwise require additional Java code to
+	 * ask for permission.
  	 *
 	 * This option should be set _before_ calling libusb_init(), and
 	 * specifices the java virtual machine only for new calls to
