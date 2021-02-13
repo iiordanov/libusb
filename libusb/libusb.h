@@ -2095,15 +2095,41 @@ enum libusb_option {
 	/** Set libusb has weak authority. With this option, libusb will skip
 	 * scan devices in libusb_init.
 	 *
-	 * This option should be set before calling libusb_init(), otherwise
+	 * This option should be set _before_ calling libusb_init(), otherwise
 	 * libusb_init will failed. Normally libusb_wrap_sys_device need set
-	 * this option.
+	 * this option.  The context pointer is unused.
 	 *
-	 * Only valid on Linux-based operating system, such as Android.
+	 * To disable this option after enabling it, pass a nonzero parameter.
+	 *
+	 * Only valid on Android for now.
 	 */
 	LIBUSB_OPTION_WEAK_AUTHORITY = 2,
 
-	LIBUSB_OPTION_ANDROID_JNIENV = 9997
+	/** Provide a JNIEnv* pointer for libusb to use on Android.  If this
+	 * pointer is nonzero, the Android SDK will be used for backend
+	 * functions that * would otherwise require additional Java code to
+	 * ask for permissions.
+ 	 *
+	 * This option should be set _before_ calling libusb_init(), and
+	 * specifices the java virtual machine only for new calls to
+	 * libusb_init() after the option is set.  The context pointer is
+	 * unused.
+ 	 *
+	 * When this option is set, the provided pointer is used for device
+	 * enumeration and connection for the entire lifetime of the libusb
+	 * context.  After connection, the normal linux backend is used via
+	 * the opened file descriptor.
+	 *
+	 * If a device does not have permission to connect, an Android Intent
+	 * is broadcast via UsbManager.requestPermission with action string
+	 * "libusb.android.USB_PERMISSION".  As documented in the Android
+	 * SDK, this Intent will have two "extras" indicating details of the
+	 * USB device in question, and whether or not the user granted
+	 * permission. The call to open the device returns LIBUSB_ERROR_ACCESS.
+	 *
+	 * Only valid on Android.
+ 	 */
+	LIBUSB_OPTION_ANDROID_JNIENV = 3
 };
 
 int LIBUSB_CALL libusb_set_option(libusb_context *ctx, enum libusb_option option, ...);

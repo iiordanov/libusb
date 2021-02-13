@@ -418,16 +418,10 @@ static int op_init(struct libusb_context *ctx)
 #ifdef __ANDROID__
 	ctx->android_javavm = android_default_javavm;
 	/*
-   	 It would be possible to automatically find the javavm, but on android the below snippet of code requires manually loading a dynamic library to avoid linking errors.  See statement from NDK technical lead at:
-	 https://android-ndk.narkive.com/xh88W2iM/issue-calling-jni-getcreatedjavavms-in-native-code#post8
-
-	if (ctx->android_javavm == NULL)
-		JNI_GetCreatedJavaVMs(
-			&ctx->android_javavm,
-			1,
-			NULL
-		);
-	*/
+	 * It's possible to automatically find a running java vm without the user providing one,
+	 * but it appears unreasonably difficult to do this until an ndk issue is resolved:
+	 * https://github.com/android/ndk/issues/1320
+	 */
 	if (ctx->android_javavm != NULL)
 		return android_jni_scan_devices(ctx);
 	if (weak_authority)
@@ -480,8 +474,9 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 
 #ifdef __ANDROID__
 	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
-		usbi_dbg("set libusb has weak authority");
-		weak_authority = 1;
+		int parameter = va_arg(ap, int);
+		weak_authority = !parameter;
+		usbi_dbg("set libusb has weak authority: %d", parameter);
 		return LIBUSB_SUCCESS;
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
 		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
