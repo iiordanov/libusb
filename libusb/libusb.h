@@ -2095,9 +2095,10 @@ enum libusb_option {
 	/** Set libusb has weak authority. With this option, libusb will skip
 	 * scan devices in libusb_init.
 	 *
-	 * This option should be set _before_ calling libusb_init(), otherwise
-	 * libusb_init will failed. Normally libusb_wrap_sys_device need set
-	 * this option.  The context pointer is unused.
+	 * This option should be set _before_ calling libusb_init(), and
+	 * influences new calls to libusb_init() after the option is set.
+	 * Normally libusb_wrap_sys_device needs this option set.  The context
+	 * pointer is unused.
 	 *
 	 * To disable this option after enabling it, pass a nonzero parameter.
 	 *

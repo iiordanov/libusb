@@ -360,6 +360,7 @@ struct libusb_context {
 #endif
 
 #ifdef __ANDROID__
+	int weak_authority;
 	JavaVM *android_javavm;
 #endif
 

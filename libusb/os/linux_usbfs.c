@@ -38,7 +38,6 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
-
 /* sysfs vs usbfs:
  * opening a usbfs node causes the device to be resumed, so we attempt to
  * avoid this during enumeration.
@@ -98,7 +97,7 @@ static int init_count = 0;
 
 #ifdef __ANDROID__
 /* have no authority to operate usb device directly */
-static int weak_authority = 0;
+static int default_weak_authority = 0;
 
 /* user-provided JavaVM to use */
 JavaVM *android_default_javavm = NULL;
@@ -424,8 +423,10 @@ static int op_init(struct libusb_context *ctx)
 	 */
 	if (ctx->android_javavm != NULL)
 		return android_jni_scan_devices(ctx);
-	if (weak_authority)
+	if (default_weak_authority) {
+		ctx->weak_authority = default_weak_authority;
 		return LIBUSB_SUCCESS;
+	}
 #endif
 
 	usbi_mutex_static_lock(&linux_hotplug_startstop_lock);
@@ -453,7 +454,7 @@ static void op_exit(struct libusb_context *ctx)
 	UNUSED(ctx);
 
 #ifdef __ANDROID__
-	if (weak_authority) {
+	if (ctx->weak_authority || ctx->android_javavm != NULL) {
 		return;
 	}
 #endif
@@ -475,7 +476,7 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 #ifdef __ANDROID__
 	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
 		int parameter = va_arg(ap, int);
-		weak_authority = !parameter;
+		default_weak_authority = !parameter;
 		usbi_dbg("set libusb has weak authority: %d", parameter);
 		return LIBUSB_SUCCESS;
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
@@ -535,8 +536,6 @@ static jobject android_jni_context(JNIEnv *jni_env)
 static int android_jni_scan_devices(struct libusb_context *ctx)
 {
 	/* Access and use the Android API via jni_env */
-
-	// NOTE/TODO: USB_HOST support could be detected with PackageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST) to fail fast if missing
 	
 	JNIEnv *jni_env;
 	int r = (*ctx->android_javavm)->GetEnv(ctx->android_javavm, (void**)&jni_env, JNI_VERSION_1_6);
@@ -545,9 +544,49 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 		return LIBUSB_ERROR_OTHER;
 
 	jobject context = android_jni_context(jni_env);
-	
-	// Object usbManager = context.getSystemService(Context.USB_SERVICE);
 	jclass Context = (*jni_env)->FindClass(jni_env, "android/content/Context");
+
+	// PackageManager packageManager = context.getPackageManager()
+	jobject packageManager = (*jni_env)->CallObjectMethod(
+		jni_env,
+		context,
+		(*jni_env)->GetMethodID(
+			jni_env,
+			Context,
+			"getPackageManager",
+			"()Landroid/content/pm/PackageManager;"
+		)
+	);
+
+	// boolean hasUsbHost = packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST)
+	jclass PackageManager = (*jni_env)->FindClass(jni_env, "android/content/pm/PackageManager");
+	bool hasUsbHost = (*jni_env)->CallBooleanMethod(
+		jni_env,
+		packageManager,
+		(*jni_env)->GetMethodID(
+			jni_env,
+			PackageManager,
+			"hasSystemFeature",
+			"(Ljava/lang/String;)Z"
+		),
+		(*jni_env)->GetStaticObjectField(
+			jni_env,
+			PackageManager,
+			(*jni_env)->GetStaticFieldID(
+				jni_env,
+				PackageManager,
+				"FEATURE_USB_HOST",
+				"Ljava/lang/String;"
+			)
+		)
+	);
+
+	if (!hasUsbHost) {
+		usbi_dbg("This device does not have the android.hardware.usb.host feature");
+		return LIBUSB_ERROR_NOT_SUPPORTED;
+	}
+	
+	// UsbManager usbManager = context.getSystemService(Context.USB_SERVICE);
 	jobject usbManager = (*jni_env)->CallObjectMethod(
 		jni_env,
 		context,
@@ -748,8 +787,6 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 		device
 	);
 	if (!permission) {
-		// this attempts to make the intent the same as when the user accepts an app for a connected device
-		
 		// intent = new Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED);
 		jclass Intent = (*jni_env)->FindClass(jni_env, "android/content/Intent");
 		jobject intent = (*jni_env)->NewObject(
@@ -781,7 +818,7 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 			0
 		);
 	
-	 // usbManager.requestPermission(device, permissionIntent);
+		// usbManager.requestPermission(device, permissionIntent);
 		(*jni_env)->CallVoidMethod(
 			jni_env,
 			usbManager,
@@ -867,7 +904,7 @@ static int android_jni_add_string_descriptor(JNIEnv *jni_env, struct linux_devic
 
 	/*
  
-	// I'm not sure where te string descriptors go.
+	// I'm not sure where the string descriptors go.
 	// When this was uncommented, it produced a type error in the parsing code.
 	// I looked at the string descriptor retrieval code and saw it sends a request to the device to get them,
 	//   so this seems low priority right now.
@@ -892,8 +929,8 @@ static int android_jni_add_string_descriptor(JNIEnv *jni_env, struct linux_devic
 	(*jni_env)->ReleaseStringChars(jni_env, jstr, str);
 	*/
 
-	(void)priv;
-	(void)*next_string ++;
+	UNUSED(priv);
+	++ *next_string;
 
 	return *next_string;
 }
