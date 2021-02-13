@@ -824,8 +824,6 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 		)
 	);
 
-	// TODO: we can now fill the descriptors correctly using usbDeviceConnection.getRawDescriptors()
-
 	if (fd != -1) {
 		hpriv->android_jni_connection = (*jni_env)->NewGlobalRef(jni_env, usbDeviceConnection);
 	}
@@ -866,11 +864,8 @@ static int android_jni_add_string_descriptor(JNIEnv *jni_env, struct linux_devic
 	}
 
 	/*
- 
-	// I'm not sure where the string descriptors go.
-	// When this was uncommented, it produced a type error in the parsing code.
-	// I looked at the string descriptor retrieval code and saw it sends a request to the device to get them,
-	//   so this seems low priority right now.
+	// The string descriptors don't go among the normal descriptors, it turns out.
+	// If these strings were deduplicated, the indexes would be correct on my test device.
 
 	const uint16_t * str = (*jni_env)->GetStringChars(jni_env, jstr, NULL);
 	int str_len = (*jni_env)->GetStringLength(jni_env, jstr) * sizeof(str[0]);
@@ -898,7 +893,7 @@ static int android_jni_add_string_descriptor(JNIEnv *jni_env, struct linux_devic
 	return *next_string;
 }
 
-static int android_jni_add_endpoint_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, uint8_t *bMaxPacketSize0, jobject endpoint)
+static int android_jni_add_endpoint_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, jobject endpoint)
 {
 	jclass UsbEndpoint = (*jni_env)->GetObjectClass(jni_env, endpoint);
 
@@ -945,15 +940,11 @@ static int android_jni_add_endpoint_descriptor(JNIEnv *jni_env, struct linux_dev
 		)
 	};
 	*(struct usbi_endpoint_descriptor *)((uint8_t*)priv->descriptors + endpoint_offset) = endpoint_desc;
-
-	if (bMaxPacketSize0 != NULL) {
-		*bMaxPacketSize0 = endpoint_desc.wMaxPacketSize;
-	}
 	
 	return LIBUSB_SUCCESS;
 }
 
-static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, uint8_t *bMaxPacketSize0, int *next_string, jobject interface)
+static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, int *next_string, jobject interface)
 {
 	jclass UsbInterface = (*jni_env)->GetObjectClass(jni_env, interface);
 
@@ -1018,7 +1009,7 @@ static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_de
 				"()I"
 			)
 		),
-		.iInterface = android_jni_add_string_descriptor(jni_env, priv, next_string,
+		.iInterface = android_jni_descriptor_index_for_string(jni_env, priv, next_string,
 			(*jni_env)->CallObjectMethod(
 				jni_env,
 				interface,
@@ -1051,19 +1042,18 @@ static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_de
 			k
 		);
 
-		int r = android_jni_add_endpoint_descriptor(jni_env, priv, bMaxPacketSize0, endpoint);
+		int r = android_jni_add_endpoint_descriptor(jni_env, priv, endpoint);
 
 		(*jni_env)->DeleteLocalRef(jni_env, endpoint);
 
 		if (r != LIBUSB_SUCCESS) {
 			return r;
 		}
-		bMaxPacketSize0 = NULL;
 	}
 	return LIBUSB_SUCCESS;
 }
 
-static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, uint8_t *bMaxPacketSize0, int *next_string, jobject config)
+static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, int *next_string, jobject config)
 {
 	jclass UsbConfiguration = (*jni_env)->GetObjectClass(jni_env, config);
 
@@ -1129,7 +1119,7 @@ static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linu
 				"getMaxPower",
 				"()I"
 			)
-		)
+		) / 2
 	};
 	if (config_desc.iConfiguration < 0) {
 		return config_desc.iConfiguration;
@@ -1149,14 +1139,13 @@ static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linu
 			j
 		);
 
-		int r = android_jni_add_interface_descriptor(jni_env, priv, bMaxPacketSize0, next_string, interface);
+		int r = android_jni_add_interface_descriptor(jni_env, priv, next_string, interface);
 
 		(*jni_env)->DeleteLocalRef(jni_env, interface);
 
 		if (r != LIBUSB_SUCCESS) {
 			return r;
 		}
-		bMaxPacketSize0 = NULL;
 	}
 	
 	config_desc.wTotalLength = priv->descriptors_len - config_offset;
@@ -1221,7 +1210,7 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 	struct usbi_device_descriptor device_desc = {
 		.bLength = LIBUSB_DT_DEVICE_SIZE,
 		.bDescriptorType = LIBUSB_DT_DEVICE,
-		.bcdUSB = 0x0300,
+		.bcdUSB = version,
 		.bDeviceClass = (*jni_env)->CallIntMethod(jni_env, device,
 			(*jni_env)->GetMethodID(
 				jni_env,
@@ -1246,7 +1235,7 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 				"()I"
 			)
 		),
-		.bMaxPacketSize0 = 0, // assigned below
+		.bMaxPacketSize0 = 8,
 		.idVendor = (*jni_env)->CallIntMethod(jni_env, device,
 			(*jni_env)->GetMethodID(
 				jni_env,
@@ -1263,7 +1252,7 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 				"()I"
 			)
 		),
-		.bcdDevice = version,
+		.bcdDevice = 0xFFFF,
 		.iManufacturer = android_jni_add_string_descriptor(jni_env, priv, &next_string, 
 			(*jni_env)->CallObjectMethod(jni_env, device,
 				(*jni_env)->GetMethodID(
@@ -1305,8 +1294,8 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 	if (device_desc.iSerialNumber < 0) {
 		return device_desc.iSerialNumber;
 	}
+	*(struct usbi_device_descriptor *)priv->descriptors = device_desc;
 
-	uint8_t bMaxPacketSize0 = 0;
 	for (int i = 0; i < numConfigurations; i ++) {
 		// UsbConfiguration config = device.getConfiguration(i)
 		jobject config = (*jni_env)->CallObjectMethod(
@@ -1320,15 +1309,13 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 			),
 			i
 		);
-		r = android_jni_add_configuration_descriptor(jni_env, priv, &bMaxPacketSize0, &next_string, config);
+		r = android_jni_add_configuration_descriptor(jni_env, priv, &next_string, config);
 		(*jni_env)->DeleteLocalRef(jni_env, config);
 		if (r != LIBUSB_SUCCESS) {
 			return r;
 		}
 	}
 
-	device_desc.bMaxPacketSize0 = bMaxPacketSize0 > 255 ? 255 : bMaxPacketSize0;
-	*(struct usbi_device_descriptor *)priv->descriptors = device_desc;
 
 	return LIBUSB_SUCCESS;
 }
