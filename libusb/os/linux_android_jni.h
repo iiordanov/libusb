@@ -21,6 +21,10 @@
 #ifndef LIBUSB_ANDROID_JNI_H
 #define LIBUSB_ANDROID_JNI_H
 
+#include "libusbi.h"
+
+struct android_jni_devices;
+
 /* from jni.h */
 typedef const struct JNINativeInterface *JNIEnv;
 typedef const struct JNIInvokeInterface *JavaVM;
@@ -32,5 +36,22 @@ typedef void *jobject;
  * more easy for a user to provide.
  */
 int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm);
+
+/* Prepares to iterate all connected devices. */
+int android_jni_devices_alloc(JavaVM *javavm, struct android_jni_devices **devices);
+
+/* Iterates through connected devices.
+ *
+ * The device jobject should be freed with android_jni_globalunref().
+ *
+ * Returns LIBUSB_ERROR_NOT_FOUND when all devices have been enumerated.
+ */
+int android_jni_devices_next(struct android_jni_devices *devices, jobject *device, uint8_t *busnum, uint8_t *devaddr);
+
+/* Frees a device iteration structure. */
+void android_jni_devices_free(struct android_jni_devices *devices);
+
+/* Frees a global reference to an object. */
+void android_jni_globalunref(JavaVM *javavm, jobject *object);
 
 #endif
