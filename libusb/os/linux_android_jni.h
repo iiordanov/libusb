@@ -37,6 +37,9 @@ typedef void *jobject;
  */
 int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm);
 
+/* Detects whether or not the platform supports usb host mode. */
+int android_jni_detect_usbhost(JavaVM *javavm, int *has_usbhost);
+
 /* Prepares to iterate all connected devices. */
 int android_jni_devices_alloc(JavaVM *javavm, struct android_jni_devices **devices);
 

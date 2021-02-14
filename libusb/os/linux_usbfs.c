@@ -549,62 +549,28 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 	/* Access and use the Android API via jni_env */
 
 	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
-	JNIEnv *jni_env;
-	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
-	if (r != JNI_OK)
-		// probably means no environment on this thread yet; could attach the vm to the thread here to handle
-		return LIBUSB_ERROR_OTHER;
-
-	jobject context = android_jni_context(jni_env);
-	jclass Context = (*jni_env)->FindClass(jni_env, "android/content/Context");
-
-	// PackageManager packageManager = context.getPackageManager()
-	jobject packageManager = (*jni_env)->CallObjectMethod(
-		jni_env,
-		context,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			Context,
-			"getPackageManager",
-			"()Landroid/content/pm/PackageManager;"
-		)
-	);
-
-	// boolean hasUsbHost = packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST)
-	jclass PackageManager = (*jni_env)->FindClass(jni_env, "android/content/pm/PackageManager");
-	bool hasUsbHost = (*jni_env)->CallBooleanMethod(
-		jni_env,
-		packageManager,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			PackageManager,
-			"hasSystemFeature",
-			"(Ljava/lang/String;)Z"
-		),
-		(*jni_env)->GetStaticObjectField(
-			jni_env,
-			PackageManager,
-			(*jni_env)->GetStaticFieldID(
-				jni_env,
-				PackageManager,
-				"FEATURE_USB_HOST",
-				"Ljava/lang/String;"
-			)
-		)
-	);
-
-	if (!hasUsbHost) {
-		usbi_dbg("This device does not have the android.hardware.usb.host feature");
-		return LIBUSB_ERROR_NOT_SUPPORTED;
-	}
+	int r, has_usbhost;
 
 	struct android_jni_devices *devices;
 	jobject device;
 	uint8_t busnum, devaddr;
 
+	r = android_jni_detect_usbhost(cpriv->android_javavm, &has_usbhost);
+
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	if (!has_usbhost) {
+		usbi_dbg("This device does not have the android.hardware.usb.host feature");
+		return LIBUSB_ERROR_NOT_SUPPORTED;
+	}
+
 	usbi_dbg("enumerating usb devices using android api");
 
 	r = android_jni_devices_alloc(cpriv->android_javavm, &devices);
+
+	if (r != LIBUSB_SUCCESS)
+		return r;
 	
 	while (android_jni_devices_next(devices, &device, &busnum, &devaddr) == LIBUSB_SUCCESS) {
 

@@ -28,10 +28,12 @@ static jmethodID Collection_iterator;
 static jmethodID HashMap_values;
 static jmethodID Iterator_hasNext, Iterator_next;
 
-static jclass ActivityThread, Context, UsbDevice, UsbManager;
+static jclass ActivityThread, Context, PackageManager, UsbDevice, UsbManager;
 static jmethodID ActivityThread__currentActivityThread, ActivityThread_getApplication;
 static jfieldID Context__USB_SERVICE;
 static jmethodID Context_getPackageManager, Context_getSystemService;
+static jfieldID PackageManager__FEATURE_USB_HOST;
+static jmethodID PackageManager_hasSystemFeature;
 static jmethodID UsbDevice_getDeviceId;
 static jmethodID UsbManager_getDeviceList;
 
@@ -60,6 +62,10 @@ int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm)
 	Context_getPackageManager = (*jni_env)->GetMethodID(jni_env, Context, "getPackageManager", "()Landroid/content/pm/PackageManager;");
 	Context_getSystemService = (*jni_env)->GetMethodID(jni_env, Context, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
 
+	PackageManager = (*jni_env)->FindClass(jni_env, "android/content/pm/PackageManager");
+	PackageManager__FEATURE_USB_HOST = (*jni_env)->GetStaticFieldID(jni_env, PackageManager, "FEATURE_USB_HOST", "Ljava/lang/String;");
+	PackageManager_hasSystemFeature = (*jni_env)->GetMethodID(jni_env, PackageManager, "hasSystemFeature", "(Ljava/lang/String;)Z");
+
 	UsbDevice = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDevice");
 	UsbDevice_getDeviceId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceId", "()I");
 
@@ -80,6 +86,27 @@ static jobject android_jni_context(JNIEnv *jni_env)
 	jobject activityThread = (*jni_env)->CallStaticObjectMethod(jni_env, ActivityThread, ActivityThread__currentActivityThread);
 	/* return activityThread.getApplication(); */
 	return (*jni_env)->CallObjectMethod(jni_env, activityThread, ActivityThread_getApplication);
+}
+
+int android_jni_detect_usbhost(JavaVM *javavm, int *has_usbhost)
+{
+	int r;
+	JNIEnv *jni_env;
+	jobject context, packageManager;
+
+	r = android_jni_jnienv(javavm, &jni_env);
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	context = android_jni_context(jni_env);
+
+	/* PackageManager packageManager = context.getPackageManager(); */
+	packageManager = (*jni_env)->CallObjectMethod(jni_env, context, Context_getPackageManager);
+
+	/* has_usbhost = packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST); */
+	*has_usbhost = (*jni_env)->CallBooleanMethod(jni_env, packageManager, PackageManager_hasSystemFeature, (*jni_env)->GetStaticObjectField(jni_env, PackageManager, PackageManager__FEATURE_USB_HOST));
+
+	return LIBUSB_SUCCESS;
 }
 
 struct android_jni_devices
