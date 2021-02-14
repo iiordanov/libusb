@@ -39,6 +39,7 @@
 #include <unistd.h>
 
 #ifdef __ANDROID__
+#include "linux_android_jni.h"
 #include <jni.h>
 #endif
 
@@ -494,17 +495,14 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 		return LIBUSB_SUCCESS;
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
 		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
-		int r = JNI_OK;
+		int r = LIBUSB_SUCCESS;
 		if (jni_env != NULL) {
-			r = (*jni_env)->GetJavaVM(jni_env, &android_default_javavm);
+			r = android_jni_javavm(jni_env, &android_default_javavm);
 		} else {
 			android_default_javavm = NULL;
 		}
 		usbi_dbg("set default jnienv pointer %p javavm pointer %p", jni_env, android_default_javavm);
-		if (r == JNI_OK)
-			return LIBUSB_SUCCESS;
-		else
-			return LIBUSB_ERROR_OTHER;	
+		return r;
 	}
 #else
 	UNUSED(ap);
