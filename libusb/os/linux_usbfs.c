@@ -851,8 +851,11 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 		memcpy(priv->descriptors, descriptors, priv->descriptors_len);
 		(*jni_env)->ReleasePrimitiveArrayCritical(jni_env, rawDescriptors, descriptors, JNI_ABORT);
 
+        // right now android_jni_device is only filled if sysfs is not being used, so localise
+        // the device descriptor as if this were usbfs
+		usbi_localize_device_descriptor(priv->descriptors);
+
 		memcpy(&dev->device_descriptor, priv->descriptors, LIBUSB_DT_DEVICE_SIZE);
-		usbi_localize_device_descriptor(&dev->device_descriptor);
 		parse_config_descriptors(dev);
 	}
 
@@ -976,14 +979,14 @@ static int android_jni_add_endpoint_descriptor(JNIEnv *jni_env, struct linux_dev
 				"()I"
 			)
 		),
-		.wMaxPacketSize = (*jni_env)->CallIntMethod(jni_env, endpoint,
+		.wMaxPacketSize = libusb_cpu_to_le16((*jni_env)->CallIntMethod(jni_env, endpoint,
 			(*jni_env)->GetMethodID(
 				jni_env,
 				UsbEndpoint,
 				"getMaxPacketSize",
 				"()I"
 			)
-		),
+		)),
 		.bInterval = (*jni_env)->CallIntMethod(jni_env, endpoint,
 			(*jni_env)->GetMethodID(
 				jni_env,
@@ -1206,7 +1209,7 @@ static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linu
 		}
 	}
 	
-	config_desc.wTotalLength = priv->descriptors_len - config_offset;
+	config_desc.wTotalLength = libusb_cpu_to_le16(priv->descriptors_len - config_offset);
 	*(struct usbi_configuration_descriptor *)((uint8_t*)priv->descriptors + config_offset) = config_desc;
 
 	return LIBUSB_SUCCESS;
@@ -1293,7 +1296,7 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 	struct usbi_device_descriptor device_desc = {
 		.bLength = LIBUSB_DT_DEVICE_SIZE,
 		.bDescriptorType = LIBUSB_DT_DEVICE,
-		.bcdUSB = version,
+		.bcdUSB = libusb_cpu_to_le16(version),
 		.bDeviceClass = (*jni_env)->CallIntMethod(jni_env, device,
 			(*jni_env)->GetMethodID(
 				jni_env,
@@ -1319,22 +1322,22 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 			)
 		),
 		.bMaxPacketSize0 = 8,
-		.idVendor = (*jni_env)->CallIntMethod(jni_env, device,
+		.idVendor = libusb_cpu_to_le16((*jni_env)->CallIntMethod(jni_env, device,
 			(*jni_env)->GetMethodID(
 				jni_env,
 				UsbDevice,
 				"getVendorId",
 				"()I"
 			)
-		),
-		.idProduct = (*jni_env)->CallIntMethod(jni_env, device,
+		)),
+		.idProduct = libusb_cpu_to_le16((*jni_env)->CallIntMethod(jni_env, device,
 			(*jni_env)->GetMethodID(
 				jni_env,
 				UsbDevice,
 				"getProductId",
 				"()I"
 			)
-		),
+		)),
 		.bcdDevice = 0xFFFF,
 		.iManufacturer = android_jni_string_descs_index(&str_descs, jni_env,
 			(*jni_env)->CallObjectMethod(jni_env, device,
@@ -1911,6 +1914,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 		if (r < 0) {
 			return r;
 		}
+		usbi_localize_device_descriptor(priv->descriptors);
 		fd = -1;
 		skip_fd = 1;
 #else
