@@ -114,6 +114,7 @@ usbi_mutex_static_t linux_hotplug_lock = USBI_MUTEX_INITIALIZER;
 
 static int linux_scan_devices(struct libusb_context *ctx);
 static int detach_kernel_driver_and_claim(struct libusb_device_handle *, uint8_t);
+static int parse_config_descriptors(struct libusb_device *dev);
 
 #if !defined(HAVE_LIBUDEV)
 static int linux_default_scan_devices(struct libusb_context *ctx);
@@ -826,6 +827,33 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 
 	if (fd != -1) {
 		hpriv->android_jni_connection = (*jni_env)->NewGlobalRef(jni_env, usbDeviceConnection);
+
+		// copy in the real descriptors
+
+		// byte[] rawDescriptrs = usbDeviceConnection.getRawDescriptors()
+		jbyteArray rawDescriptors = (*jni_env)->CallObjectMethod(
+			jni_env,
+			usbDeviceConnection,
+			(*jni_env)->GetMethodID(
+				jni_env,
+				UsbDeviceConnection,
+				"getRawDescriptors",
+				"()[B"
+			)
+		);
+
+		struct libusb_device *dev = handle->dev;
+
+		priv->descriptors_len = (*jni_env)->GetArrayLength(jni_env, rawDescriptors);
+		priv->descriptors = usbi_reallocf(priv->descriptors, priv->descriptors_len);
+
+		jbyte * descriptors = (*jni_env)->GetPrimitiveArrayCritical(jni_env, rawDescriptors, NULL);
+		memcpy(priv->descriptors, descriptors, priv->descriptors_len);
+		(*jni_env)->ReleasePrimitiveArrayCritical(jni_env, rawDescriptors, descriptors, JNI_ABORT);
+
+		memcpy(&dev->device_descriptor, priv->descriptors, LIBUSB_DT_DEVICE_SIZE);
+		usbi_localize_device_descriptor(&dev->device_descriptor);
+		parse_config_descriptors(dev);
 	}
 
 	return fd;
