@@ -70,6 +70,9 @@ void android_jni_devices_free(struct android_jni_devices *devices);
  */
 int android_jni_connect(JavaVM *javavm, jobject device, jobject *connection, int *fd, int8_t **descriptors, int *descriptors_len);
 
+/* Disconnects from a device. */
+int android_jni_disconnect(JavaVM *javavm, jobject connection);
+
 /* Frees a global reference to an object. */
 void android_jni_globalunref(JavaVM *javavm, jobject *object);
 

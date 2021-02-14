@@ -108,7 +108,6 @@ static int default_weak_authority = 0;
 JavaVM *android_default_javavm = NULL;
 
 static int android_jni_scan_devices(struct libusb_context *ctx);
-static void android_jni_disconnect(struct libusb_device_handle *handle);
 #endif
 
 /* Serialize hotplug start/stop */
@@ -587,33 +586,6 @@ static int get_android_jni_fd(struct libusb_device_handle *handle)
 	parse_config_descriptors(dev);
 
 	return fd;
-}
-
-static void android_jni_disconnect(struct libusb_device_handle *dev_handle)
-{
-	struct linux_context_priv *cpriv = usbi_get_context_priv(HANDLE_CTX(dev_handle));
-	JNIEnv *jni_env;
-	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
-	if (r != JNI_OK) {
-		usbi_dbg("failed to get jni_env");
-		return;
-	}
-
-	struct linux_device_handle_priv *hpriv = usbi_get_device_handle_priv(dev_handle);
-	jobject usbDeviceConnection = hpriv->android_jni_connection;
-
-	// usbDeviceConnection.close();
-	jclass UsbDeviceConnection = (*jni_env)->GetObjectClass(jni_env, usbDeviceConnection);
-	(*jni_env)->CallVoidMethod(
-		jni_env,
-		usbDeviceConnection,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			UsbDeviceConnection,
-			"close",
-			"()V"
-		)
-	);
 }
 
 struct android_jni_string_descriptors {
@@ -2163,15 +2135,17 @@ static int op_open(struct libusb_device_handle *handle)
 static void op_close(struct libusb_device_handle *dev_handle)
 {
 	struct linux_device_handle_priv *hpriv = usbi_get_device_handle_priv(dev_handle);
+	struct libusb_context *ctx = HANDLE_CTX(dev_handle);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 	/* fd may have already been removed by POLLERR condition in op_handle_events() */
 	if (!hpriv->fd_removed)
-		usbi_remove_event_source(HANDLE_CTX(dev_handle), hpriv->fd);
+		usbi_remove_event_source(ctx, hpriv->fd);
 	if (!hpriv->fd_keep)
 		close(hpriv->fd);
 #ifdef __ANDROID__
 	if (hpriv->android_jni_connection != NULL)
-		android_jni_disconnect(dev_handle);
+		android_jni_disconnect(cpriv->android_javavm, hpriv->android_jni_connection);
 #endif
 }
 
@@ -2595,12 +2569,7 @@ static void op_destroy_device(struct libusb_device *dev)
 
 #ifdef __ANDROID__
 	if (priv->android_jni_device != NULL) {
-		if (cpriv->android_javavm != NULL) {
-			JNIEnv *jni_env;
-			int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
-			if (r == JNI_OK)
-				(*jni_env)->DeleteGlobalRef(jni_env, priv->android_jni_device);
-		}
+		android_jni_globalunref(cpriv->android_javavm, priv->android_jni_device);
 	}
 #endif
 

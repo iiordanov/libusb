@@ -39,7 +39,7 @@ static jfieldID PackageManager__FEATURE_USB_HOST;
 static jmethodID PackageManager_hasSystemFeature;
 static jmethodID PendingIntent__getBroadcast;
 static jmethodID UsbDevice_getDeviceId;
-static jmethodID UsbDeviceConnection_getFileDescriptor, UsbDeviceConnection_getRawDescriptors;
+static jmethodID UsbDeviceConnection_close, UsbDeviceConnection_getFileDescriptor, UsbDeviceConnection_getRawDescriptors;
 static jmethodID UsbManager_getDeviceList, UsbManager_hasPermission, UsbManager_openDevice, UsbManager_requestPermission;
 
 int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm)
@@ -81,6 +81,7 @@ int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm)
 	UsbDevice_getDeviceId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceId", "()I");
 
 	UsbDeviceConnection = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDeviceConnection");
+	UsbDeviceConnection_close = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "close", "()V");
 	UsbDeviceConnection_getFileDescriptor = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getFileDescriptor", "()I");
 	UsbDeviceConnection_getRawDescriptors = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getRawDescriptors", "()[B");
 
@@ -294,6 +295,21 @@ int android_jni_connect(JavaVM *javavm, jobject device, jobject *connection, int
 
 	(*jni_env)->DeleteLocalRef(jni_env, local_descriptors);
 	(*jni_env)->DeleteLocalRef(jni_env, local_connection);
+
+	return LIBUSB_SUCCESS;
+}
+
+int android_jni_disconnect(JavaVM *javavm, jobject connection)
+{
+	int r;
+	JNIEnv *jni_env;
+
+	r = android_jni_jnienv(javavm, &jni_env);
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	/* connection.close(); */
+	(*jni_env)->CallVoidMethod(jni_env, connection, UsbDeviceConnection_close);
 
 	return LIBUSB_SUCCESS;
 }
