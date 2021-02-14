@@ -20,6 +20,8 @@
 #include "linux_android_jni.h"
 #include "libusb.h"
 
+#include <string.h>
+
 #include <jni.h>
 
 
@@ -28,14 +30,17 @@ static jmethodID Collection_iterator;
 static jmethodID HashMap_values;
 static jmethodID Iterator_hasNext, Iterator_next;
 
-static jclass ActivityThread, Context, PackageManager, UsbDevice, UsbManager;
+static jclass ActivityThread, Context, Intent, PackageManager, PendingIntent, UsbDevice, UsbDeviceConnection, UsbManager;
 static jmethodID ActivityThread__currentActivityThread, ActivityThread_getApplication;
 static jfieldID Context__USB_SERVICE;
 static jmethodID Context_getPackageManager, Context_getSystemService;
+static jmethodID Intent_init;
 static jfieldID PackageManager__FEATURE_USB_HOST;
 static jmethodID PackageManager_hasSystemFeature;
+static jmethodID PendingIntent__getBroadcast;
 static jmethodID UsbDevice_getDeviceId;
-static jmethodID UsbManager_getDeviceList;
+static jmethodID UsbDeviceConnection_getFileDescriptor, UsbDeviceConnection_getRawDescriptors;
+static jmethodID UsbManager_getDeviceList, UsbManager_hasPermission, UsbManager_openDevice, UsbManager_requestPermission;
 
 int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm)
 {
@@ -62,15 +67,28 @@ int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm)
 	Context_getPackageManager = (*jni_env)->GetMethodID(jni_env, Context, "getPackageManager", "()Landroid/content/pm/PackageManager;");
 	Context_getSystemService = (*jni_env)->GetMethodID(jni_env, Context, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
 
+	Intent = (*jni_env)->FindClass(jni_env, "android/content/Intent");
+	Intent_init = (*jni_env)->GetMethodID(jni_env, Intent, "<init>", "(Ljava/lang/String;)V");
+
 	PackageManager = (*jni_env)->FindClass(jni_env, "android/content/pm/PackageManager");
 	PackageManager__FEATURE_USB_HOST = (*jni_env)->GetStaticFieldID(jni_env, PackageManager, "FEATURE_USB_HOST", "Ljava/lang/String;");
 	PackageManager_hasSystemFeature = (*jni_env)->GetMethodID(jni_env, PackageManager, "hasSystemFeature", "(Ljava/lang/String;)Z");
 
+	PendingIntent = (*jni_env)->FindClass(jni_env, "android/app/PendingIntent");
+	PendingIntent__getBroadcast = (*jni_env)->GetStaticMethodID(jni_env, PendingIntent, "getBroadcast", "(Landroid/content/Context;ILandroid/content/Intent;I)Landroid/app/PendingIntent;");
+
 	UsbDevice = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDevice");
 	UsbDevice_getDeviceId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceId", "()I");
 
+	UsbDeviceConnection = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDeviceConnection");
+	UsbDeviceConnection_getFileDescriptor = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getFileDescriptor", "()I");
+	UsbDeviceConnection_getRawDescriptors = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getRawDescriptors", "()[B");
+
 	UsbManager = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbManager");
 	UsbManager_getDeviceList = (*jni_env)->GetMethodID(jni_env, UsbManager, "getDeviceList", "()Ljava/util/HashMap;");
+	UsbManager_hasPermission = (*jni_env)->GetMethodID(jni_env, UsbManager, "hasPermission", "(Landroid/hardware/usb/UsbDevice;)Z");
+	UsbManager_openDevice = (*jni_env)->GetMethodID(jni_env, UsbManager, "openDevice", "(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;");
+	UsbManager_requestPermission = (*jni_env)->GetMethodID(jni_env, UsbManager, "requestPermission", "(Landroid/hardware/usb/UsbDevice;Landroid/app/PendingIntent;)V");
 
 	return LIBUSB_SUCCESS;
 }
@@ -200,6 +218,84 @@ void android_jni_devices_free(struct android_jni_devices *devices)
 		(*jni_env)->DeleteGlobalRef(jni_env, devices->iterator);
 
 	free(devices);
+}
+
+int android_jni_connect(JavaVM *javavm, jobject device, jobject *connection, int *fd, int8_t **descriptors, int *descriptors_len)
+{
+	int permission, r;
+	JNIEnv *jni_env;
+	jobject context, usbManager, intent, permissionIntent, local_connection;
+	jbyteArray local_descriptors;
+	jbyte * local_descriptors_ptr;
+
+	r = android_jni_jnienv(javavm, &jni_env);
+	if (r != LIBUSB_SUCCESS)
+		return r;
+	context = android_jni_context(jni_env);
+	
+	/* UsbManager usbManager = context.getSystemService(Context.USB_SERVICE); */
+	usbManager = (*jni_env)->CallObjectMethod(jni_env, context, Context_getSystemService, (*jni_env)->GetStaticObjectField(jni_env, Context, Context__USB_SERVICE));
+
+	/* boolean permission = usbManager.hasPermission(device); */
+	permission = (*jni_env)->CallBooleanMethod(jni_env, usbManager, UsbManager_hasPermission, device);
+
+	if (!permission) {
+
+		/* Intent intent = new Intent("libusb.android.USB_PERMISSION"); */
+		intent = (*jni_env)->NewObject(jni_env, Intent, Intent_init, (*jni_env)->NewStringUTF(jni_env, "libusb.android.USB_PERMISSION"));
+
+		/* PendingIntent permissionIntent = PendingIntent.getBroadcast(context, 0, intent, 0); */
+		permissionIntent = (*jni_env)->CallStaticObjectMethod(jni_env, PendingIntent, PendingIntent__getBroadcast, context, 0, intent, 0);
+
+		(*jni_env)->DeleteLocalRef(jni_env, intent);
+
+		/* usbManager.requestPermission(device, permissionIntent); */
+		(*jni_env)->CallVoidMethod(jni_env, usbManager, UsbManager_requestPermission, device, permissionIntent);
+
+		(*jni_env)->DeleteLocalRef(jni_env, permissionIntent);
+		(*jni_env)->DeleteLocalRef(jni_env, usbManager);
+
+		return LIBUSB_ERROR_ACCESS;
+	}
+
+	/* UsbDeviceConnection local_connection = usbManager.openDevice(device); */
+	local_connection = (*jni_env)->CallObjectMethod(jni_env, usbManager, UsbManager_openDevice, device);
+
+	(*jni_env)->DeleteLocalRef(jni_env, usbManager);
+
+	/* fd output */
+	/* fd = local_connection.getFileDescriptor(); */
+	*fd = (*jni_env)->CallIntMethod(jni_env, local_connection, UsbDeviceConnection_getFileDescriptor);
+
+	if (*fd == -1) {
+		(*jni_env)->DeleteLocalRef(jni_env, local_connection);
+		return LIBUSB_ERROR_IO;
+	}
+	
+	/* byte[] local_descriptors = local_connection.getRawDescriptors(); */
+	local_descriptors = (*jni_env)->CallObjectMethod(jni_env, local_connection, UsbDeviceConnection_getRawDescriptors);
+
+	/* descriptors buffer output */
+	*descriptors_len = (*jni_env)->GetArrayLength(jni_env, local_descriptors);
+	*descriptors = malloc(*descriptors_len);
+	if (!*descriptors) {
+		(*jni_env)->DeleteLocalRef(jni_env, local_descriptors);
+		(*jni_env)->DeleteLocalRef(jni_env, local_connection);
+		return LIBUSB_ERROR_NO_MEM;
+	}
+
+	/* jni buffer copy */
+	local_descriptors_ptr = (*jni_env)->GetPrimitiveArrayCritical(jni_env, local_descriptors, NULL);
+	memcpy(*descriptors, local_descriptors_ptr, *descriptors_len);
+	(*jni_env)->ReleasePrimitiveArrayCritical(jni_env, local_descriptors, local_descriptors_ptr, JNI_ABORT);
+
+	/* connection jobject output */
+	*connection = (*jni_env)->NewGlobalRef(jni_env, local_connection);
+
+	(*jni_env)->DeleteLocalRef(jni_env, local_descriptors);
+	(*jni_env)->DeleteLocalRef(jni_env, local_connection);
+
+	return LIBUSB_SUCCESS;
 }
 
 void android_jni_globalunref(JavaVM *javavm, jobject *object)

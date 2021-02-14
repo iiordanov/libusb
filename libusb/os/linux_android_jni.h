@@ -54,6 +54,22 @@ int android_jni_devices_next(struct android_jni_devices *devices, jobject *devic
 /* Frees a device iteration structure. */
 void android_jni_devices_free(struct android_jni_devices *devices);
 
+/* Connects to a device.
+ *
+ * The connection jobject should be freed with android_jni_globalunref().
+ *
+ * The descriptors buffer should be freed with free().
+ *
+ * If permission is needed, LIBUSB_ERROR_ACCESS is returned and permission is requested of the user,
+ * using an intent with the action "libusb.android.USB_PERMISSION".
+ *
+ * For further information on this intent, which is dispatched by UsbManager.requestPermission, see:
+ *  https://developer.android.com/guide/topics/connectivity/usb/host#permission-d
+ *
+ *  TODO: separate the permission calls out to ease maintenance
+ */
+int android_jni_connect(JavaVM *javavm, jobject device, jobject *connection, int *fd, int8_t **descriptors, int *descriptors_len);
+
 /* Frees a global reference to an object. */
 void android_jni_globalunref(JavaVM *javavm, jobject *object);
 

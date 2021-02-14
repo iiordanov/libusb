@@ -108,7 +108,6 @@ static int default_weak_authority = 0;
 JavaVM *android_default_javavm = NULL;
 
 static int android_jni_scan_devices(struct libusb_context *ctx);
-static int android_jni_connect(struct libusb_device_handle *handle);
 static void android_jni_disconnect(struct libusb_device_handle *handle);
 #endif
 
@@ -514,36 +513,6 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 
 #ifdef __ANDROID__
 
-static jobject android_jni_context(JNIEnv *jni_env)
-{
-	// ActivityThread activityThread = ActivityThread.currentActivityThread();
-	jclass ActivityThread = (*jni_env)->FindClass(jni_env, "android/app/ActivityThread");
-	jobject activityThread = (*jni_env)->CallStaticObjectMethod(
-		jni_env,
-		ActivityThread,
-		(*jni_env)->GetStaticMethodID(
-			jni_env,
-			ActivityThread,
-			"currentActivityThread",
-			"()Landroid/app/ActivityThread;"
-		)
-	);
-
-	// Application context = activityThread.getApplication();
-	jobject context = (*jni_env)->CallObjectMethod(
-		jni_env,
-		activityThread,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			ActivityThread,
-			"getApplication",
-			"()Landroid/app/Application;"
-		)
-	);
-
-	return context;
-}
-
 static int android_jni_scan_devices(struct libusb_context *ctx)
 {
 	/* Access and use the Android API via jni_env */
@@ -585,163 +554,37 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 	return LIBUSB_SUCCESS;
 }
 
-static int android_jni_connect(struct libusb_device_handle *handle)
+static int get_android_jni_fd(struct libusb_device_handle *handle)
 {
 	struct linux_context_priv *cpriv = usbi_get_context_priv(HANDLE_CTX(handle));
-	JNIEnv *jni_env;
-	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
-	if (r != JNI_OK)
-		return LIBUSB_ERROR_OTHER;
-
-	struct linux_device_priv *priv = usbi_get_device_priv(handle->dev);
+	struct libusb_device *dev = handle->dev;
+	struct linux_device_priv *priv = usbi_get_device_priv(dev);
 	struct linux_device_handle_priv *hpriv = usbi_get_device_handle_priv(handle);
-	jobject device = priv->android_jni_device;
-	jobject context = android_jni_context(jni_env);  
 
-	// Object usbManager = context.getSystemService(Context.USB_SERVICE);
-	jclass Context = (*jni_env)->FindClass(jni_env, "android/content/Context");
-	jobject usbManager = (*jni_env)->CallObjectMethod(
-		jni_env,
-		context,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			Context,
-			"getSystemService",
-			"(Ljava/lang/String;)Ljava/lang/Object;"
-		),
-		(*jni_env)->GetStaticObjectField(
-			jni_env,
-			Context,
-			(*jni_env)->GetStaticFieldID(
-				jni_env,
-				Context,
-				"USB_SERVICE",
-				"Ljava/lang/String;"
-			)
-		)
+	int r, fd, descriptors_len;
+	int8_t *descriptors;
+
+	r = android_jni_connect(
+		cpriv->android_javavm,
+		priv->android_jni_device,
+		&hpriv->android_jni_connection,
+		&fd,
+		&descriptors,
+		&descriptors_len
 	);
-	jclass UsbManager = (*jni_env)->GetObjectClass(jni_env, usbManager);
+	if (r != LIBUSB_SUCCESS)
+		return r;
 
-	// boolean permission = usbManager.hasPermission(device);
-	bool permission = (*jni_env)->CallBooleanMethod(
-		jni_env,
-		usbManager,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			UsbManager,
-			"hasPermission",
-			"(Landroid/hardware/usb/UsbDevice;)Z"
-		),
-		device
-	);
-	if (!permission) {
-		// intent = new Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED);
-		jclass Intent = (*jni_env)->FindClass(jni_env, "android/content/Intent");
-		jobject intent = (*jni_env)->NewObject(
-			jni_env,
-			Intent,
-			(*jni_env)->GetMethodID(
-				jni_env,
-				Intent,
-				"<init>",
-				"(Ljava/lang/String;)V"
-			),
-			(*jni_env)->NewStringUTF(jni_env, "libusb.android.USB_PERMISSION")
-		);
-		
-		// PendingIntent permissionIntent = PendingIntent.getBroadcast(context, 0, intent, 0);
-		jclass PendingIntent = (*jni_env)->FindClass(jni_env, "android/app/PendingIntent");
-		jobject permissionIntent = (*jni_env)->CallStaticObjectMethod(
-			jni_env,
-			PendingIntent,
-			(*jni_env)->GetStaticMethodID(
-				jni_env,
-				PendingIntent,
-				"getBroadcast",
-				"(Landroid/content/Context;ILandroid/content/Intent;I)Landroid/app/PendingIntent;"
-			),
-			context,
-			0,
-			intent,
-			0
-		);
-	
-		// usbManager.requestPermission(device, permissionIntent);
-		(*jni_env)->CallVoidMethod(
-			jni_env,
-			usbManager,
-			(*jni_env)->GetMethodID(
-				jni_env,
-				UsbManager,
-				"requestPermission",
-				"(Landroid/hardware/usb/UsbDevice;Landroid/app/PendingIntent;)V"
-			),
-			device,
-			permissionIntent
-		);
+	free(priv->descriptors);
+	priv->descriptors = descriptors;
+	priv->descriptors_len = descriptors_len;
 
-		return LIBUSB_ERROR_ACCESS;
-	} // !permission
+	/* right now android_jni_device is only filled if sysfs is not being used, so localize
+	 * the device descriptor as if this were usbfs */
+	usbi_localize_device_descriptor(priv->descriptors);
 
-	// UsbDeviceConnection usbDeviceConnection = usbManager.openDevice(device);
-	jobject usbDeviceConnection = (*jni_env)->CallObjectMethod(
-		jni_env,
-		usbManager,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			UsbManager,
-			"openDevice",
-			"(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;"
-		),
-		device
-	);
-
-	// int fd = usbDeviceConnection.getFileDescriptor();
-	jclass UsbDeviceConnection = (*jni_env)->GetObjectClass(jni_env, usbDeviceConnection);
-	int fd = (*jni_env)->CallIntMethod(
-		jni_env,
-		usbDeviceConnection,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			UsbDeviceConnection,
-			"getFileDescriptor",
-			"()I"
-		)
-	);
-
-	if (fd != -1) {
-		hpriv->android_jni_connection = (*jni_env)->NewGlobalRef(jni_env, usbDeviceConnection);
-
-		// copy in the real descriptors
-
-		// byte[] rawDescriptrs = usbDeviceConnection.getRawDescriptors()
-		jbyteArray rawDescriptors = (*jni_env)->CallObjectMethod(
-			jni_env,
-			usbDeviceConnection,
-			(*jni_env)->GetMethodID(
-				jni_env,
-				UsbDeviceConnection,
-				"getRawDescriptors",
-				"()[B"
-			)
-		);
-
-		struct libusb_device *dev = handle->dev;
-
-		priv->descriptors_len = (*jni_env)->GetArrayLength(jni_env, rawDescriptors);
-		priv->descriptors = usbi_reallocf(priv->descriptors, priv->descriptors_len);
-
-		jbyte * descriptors = (*jni_env)->GetPrimitiveArrayCritical(jni_env, rawDescriptors, NULL);
-		memcpy(priv->descriptors, descriptors, priv->descriptors_len);
-		(*jni_env)->ReleasePrimitiveArrayCritical(jni_env, rawDescriptors, descriptors, JNI_ABORT);
-
-		// right now android_jni_device is only filled if sysfs is not being used, so localise
-		// the device descriptor as if this were usbfs
-		usbi_localize_device_descriptor(priv->descriptors);
-
-		memcpy(&dev->device_descriptor, priv->descriptors, LIBUSB_DT_DEVICE_SIZE);
-		parse_config_descriptors(dev);
-	}
+	memcpy(&dev->device_descriptor, priv->descriptors, LIBUSB_DT_DEVICE_SIZE);
+	parse_config_descriptors(dev);
 
 	return fd;
 }
@@ -2290,7 +2133,7 @@ static int op_open(struct libusb_device_handle *handle)
 #ifdef __ANDROID__
 	struct linux_device_priv *priv = usbi_get_device_priv(handle->dev);
 	if (priv->android_jni_device != NULL)
-		fd = android_jni_connect(handle);
+		fd = get_android_jni_fd(handle);
 #endif
 
 	if (fd < 0)
