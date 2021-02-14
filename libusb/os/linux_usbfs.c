@@ -858,7 +858,7 @@ static void android_jni_disconnect(struct libusb_device_handle *dev_handle)
 }
 
 struct android_jni_string_descriptors {
-	uint8_t * descs;
+	uint8_t *descs;
 	int len;
 };
 
@@ -885,7 +885,7 @@ static int android_jni_string_descs_index(struct android_jni_string_descriptors 
 		return 0;
 	}
 
-	const uint16_t * str = (*jni_env)->GetStringChars(jni_env, jstr, NULL);
+	const uint16_t *str = (*jni_env)->GetStringChars(jni_env, jstr, NULL);
 	int str_len = (*jni_env)->GetStringLength(jni_env, jstr) * sizeof(str[0]);
 
 	int offset, index;
@@ -970,7 +970,7 @@ static int android_jni_add_endpoint_descriptor(JNIEnv *jni_env, struct linux_dev
 	return LIBUSB_SUCCESS;
 }
 
-static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, struct android_jni_string_descriptors * str_descs, jobject interface)
+static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_device_priv *priv, struct android_jni_string_descriptors *str_descs, uint8_t *bNumInterfaces, jobject interface)
 {
 	jclass UsbInterface = (*jni_env)->GetObjectClass(jni_env, interface);
 
@@ -1053,6 +1053,10 @@ static int android_jni_add_interface_descriptor(JNIEnv *jni_env, struct linux_de
 	}
 	*(struct usbi_interface_descriptor *)((uint8_t*)priv->descriptors + interface_offset) = interface_desc;
 
+	if (interface_desc.bInterfaceNumber >= *bNumInterfaces) {
+		*bNumInterfaces = interface_desc.bInterfaceNumber + 1;
+	}
+
 
 	for (int k = 0; k < numEndpoints; k ++) {
 		// UsbEndpoint endpoint = interface.getEndpoint(k);
@@ -1104,7 +1108,7 @@ static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linu
 		.bLength = LIBUSB_DT_CONFIG_SIZE,
 		.bDescriptorType = LIBUSB_DT_CONFIG,
 		.wTotalLength = 0, // assigned below
-		.bNumInterfaces = numInterfaces,
+		.bNumInterfaces = 0, // assigned within interfaces
 		.bConfigurationValue = (*jni_env)->CallIntMethod(jni_env, config,
 			(*jni_env)->GetMethodID(
 				jni_env,
@@ -1165,7 +1169,7 @@ static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linu
 			j
 		);
 
-		int r = android_jni_add_interface_descriptor(jni_env, priv, str_descs, interface);
+		int r = android_jni_add_interface_descriptor(jni_env, priv, str_descs, &config_desc.bNumInterfaces, interface);
 
 		(*jni_env)->DeleteLocalRef(jni_env, interface);
 
@@ -1220,16 +1224,40 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 				"()Ljava/lang/String;"
 			)
 		);
-		const char * versionstr = (*jni_env)->GetStringUTFChars(jni_env, versionjstr, NULL);
-		char * subversion;
+		const char *versionstr = (*jni_env)->GetStringUTFChars(jni_env, versionjstr, NULL);
+		char *subversion;
 		int tens, ones, tenths, hundredths;
 		ones = strtoul(versionstr, &subversion, 10);
+		hundredths = strtoul(subversion + 1, NULL, 10);
+		(*jni_env)->ReleaseStringUTFChars(jni_env, versionjstr, versionstr);
+
+		// Android parsing bug was fixed in commit 608ec66d62647f60c3988922fead33fd7e07755e in Pie
+
+		// int androidver = Build.VERSION.SDK_INT;
+		jclass Build_VERSION = (*jni_env)->FindClass(jni_env, "android/os/Build$VERSION");
+		jint androidver = (*jni_env)->GetStaticIntField(
+			jni_env,
+			Build_VERSION, 
+			(*jni_env)->GetStaticFieldID(
+				jni_env,
+				Build_VERSION,
+				"SDK_INT",
+				"I"
+			)
+		);
+
+		int pie = 28; // https://developer.android.com/reference/android/os/Build.VERSION_CODES#P
+
+		if (androidver < pie) {
+			// undo pre-pie parsing bug
+			tenths = hundredths / 16;
+			hundredths = hundredths % 16;
+		} else {
+			tenths = hundredths / 10;
+			hundredths = hundredths % 10;
+		}
 		tens = ones / 10;
 		ones = ones % 10;
-		hundredths = strtoul(subversion + 1, NULL, 10);
-		tenths = hundredths / 10;
-		hundredths = hundredths % 10;
-		(*jni_env)->ReleaseStringUTFChars(jni_env, versionjstr, versionstr);
 
 		version = hundredths | (tenths << 4) | (ones << 8) | (tens << 12);
 	}
