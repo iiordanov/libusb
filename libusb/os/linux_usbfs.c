@@ -38,6 +38,10 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
+
 /* sysfs vs usbfs:
  * opening a usbfs node causes the device to be resumed, so we attempt to
  * avoid this during enumeration.
@@ -129,6 +133,13 @@ struct kernel_version {
 struct config_descriptor {
 	struct usbi_configuration_descriptor *desc;
 	size_t actual_len;
+};
+
+struct linux_context_priv {
+#ifdef __ANDROID__
+	int weak_authority;
+	JavaVM *android_javavm;
+#endif
 };
 
 struct linux_device_priv {
@@ -372,6 +383,7 @@ static int op_init(struct libusb_context *ctx)
 	struct kernel_version kversion;
 	const char *usbfs_path;
 	int r;
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 	if (get_kernel_version(ctx, &kversion) < 0)
 		return LIBUSB_ERROR_OTHER;
@@ -416,16 +428,16 @@ static int op_init(struct libusb_context *ctx)
 	}
 
 #ifdef __ANDROID__
-	ctx->android_javavm = android_default_javavm;
+	cpriv->android_javavm = android_default_javavm;
 	/*
 	 * It's possible to automatically find a running java vm without the user providing one,
 	 * but it appears unreasonably difficult to do this until an ndk issue is resolved:
 	 * https://github.com/android/ndk/issues/1320
 	 */
-	if (ctx->android_javavm != NULL)
+	if (cpriv->android_javavm != NULL)
 		return android_jni_scan_devices(ctx);
 	if (default_weak_authority) {
-		ctx->weak_authority = default_weak_authority;
+		cpriv->weak_authority = default_weak_authority;
 		return LIBUSB_SUCCESS;
 	}
 #endif
@@ -455,7 +467,8 @@ static void op_exit(struct libusb_context *ctx)
 	UNUSED(ctx);
 
 #ifdef __ANDROID__
-	if (ctx->weak_authority || ctx->android_javavm != NULL) {
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
+	if (cpriv->weak_authority || cpriv->android_javavm != NULL) {
 		return;
 	}
 #endif
@@ -536,9 +549,10 @@ static jobject android_jni_context(JNIEnv *jni_env)
 static int android_jni_scan_devices(struct libusb_context *ctx)
 {
 	/* Access and use the Android API via jni_env */
-	
+
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 	JNIEnv *jni_env;
-	int r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, &jni_env, NULL);
+	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK)
 		// probably means no environment on this thread yet; could attach the vm to the thread here to handle
 		return LIBUSB_ERROR_OTHER;
@@ -704,8 +718,9 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 
 static int android_jni_connect(struct libusb_device_handle *handle)
 {
+	struct linux_context_priv *cpriv = usbi_get_context_priv(handle->dev->ctx);
 	JNIEnv *jni_env;
-	int r = (*handle->dev->ctx->android_javavm)->AttachCurrentThread(handle->dev->ctx->android_javavm, &jni_env, NULL);
+	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK)
 		return LIBUSB_ERROR_OTHER;
 
@@ -851,8 +866,8 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 		memcpy(priv->descriptors, descriptors, priv->descriptors_len);
 		(*jni_env)->ReleasePrimitiveArrayCritical(jni_env, rawDescriptors, descriptors, JNI_ABORT);
 
-        // right now android_jni_device is only filled if sysfs is not being used, so localise
-        // the device descriptor as if this were usbfs
+		// right now android_jni_device is only filled if sysfs is not being used, so localise
+		// the device descriptor as if this were usbfs
 		usbi_localize_device_descriptor(priv->descriptors);
 
 		memcpy(&dev->device_descriptor, priv->descriptors, LIBUSB_DT_DEVICE_SIZE);
@@ -864,8 +879,9 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 
 static void android_jni_disconnect(struct libusb_device_handle *dev_handle)
 {
+	struct linux_context_priv *cpriv = usbi_get_context_priv(dev_handle->dev->ctx);
 	JNIEnv *jni_env;
-	int r = (*dev_handle->dev->ctx->android_javavm)->AttachCurrentThread(dev_handle->dev->ctx->android_javavm, &jni_env, NULL);
+	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK) {
 		usbi_dbg("failed to get jni_env");
 		return;
@@ -1215,12 +1231,15 @@ static int android_jni_add_configuration_descriptor(JNIEnv *jni_env, struct linu
 	return LIBUSB_SUCCESS;
 }
 
-static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_device_priv *priv, jobject device)
+static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_device_priv *priv)
 {
 	// Ideally the results of all these jni calls throughout this file, to get
 	// class objects and method ids, would be cached and reused.  They are
 	// slow.  Most of the results could be made static scope and the calls
 	// performed in the option handler.
+	
+	// UsbDevice device
+	jobject device = priv->android_jni_device;
 
 	// int numConfigurations = device.getConfigurationCount();
 	jclass UsbDevice = (*jni_env)->GetObjectClass(jni_env, device);
@@ -1864,6 +1883,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 {
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
 	struct libusb_context *ctx = DEVICE_CTX(dev);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 	size_t alloc_len;
 	int fd, speed, r, skip_fd = 0;
 	ssize_t nb;
@@ -1906,11 +1926,11 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 #ifdef __ANDROID__
 	} else if (platform_ptr != NULL) {
 		JNIEnv *jni_env;
-		r = (*ctx->android_javavm)->AttachCurrentThread(ctx->android_javavm, &jni_env, NULL);
+		r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
 		if (r != JNI_OK)
 			return LIBUSB_ERROR_OTHER;
 		priv->android_jni_device = (*jni_env)->NewGlobalRef(jni_env, platform_ptr);
-		r = android_jni_add_device_descriptors(jni_env, priv, platform_ptr);
+		r = android_jni_add_device_descriptors(jni_env, priv);
 		if (r < 0) {
 			return r;
 		}
@@ -2372,7 +2392,8 @@ static int op_open(struct libusb_device_handle *handle)
 	int fd = -1, r;
 
 #ifdef __ANDROID__
-	if (handle->dev->ctx->android_javavm != NULL)
+	struct linux_device_priv *priv = usbi_get_device_priv(handle->dev);
+	if (priv->android_jni_device != NULL)
 		fd = android_jni_connect(handle);
 #endif
 
@@ -2831,12 +2852,13 @@ static int op_release_interface(struct libusb_device_handle *handle, uint8_t int
 static void op_destroy_device(struct libusb_device *dev)
 {
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(dev->ctx);
 
 #ifdef __ANDROID__
 	if (priv->android_jni_device != NULL) {
-		if (dev->ctx->android_javavm != NULL) {
+		if (cpriv->android_javavm != NULL) {
 			JNIEnv *jni_env;
-			int r = (*dev->ctx->android_javavm)->AttachCurrentThread(dev->ctx->android_javavm, &jni_env, NULL);
+			int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
 			if (r == JNI_OK)
 				(*jni_env)->DeleteGlobalRef(jni_env, priv->android_jni_device);
 		}
@@ -3802,6 +3824,7 @@ const struct usbi_os_backend usbi_backend = {
 
 	.handle_events = op_handle_events,
 
+	.context_priv_size = sizeof(struct linux_context_priv),
 	.device_priv_size = sizeof(struct linux_device_priv),
 	.device_handle_priv_size = sizeof(struct linux_device_handle_priv),
 	.transfer_priv_size = sizeof(struct linux_transfer_priv),
