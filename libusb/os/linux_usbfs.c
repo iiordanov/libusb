@@ -661,7 +661,7 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 		)
 	);
 
-	// while (deviceEntryIterator.hasNext()) { }
+	// while (deviceIterator.hasNext()) { }
 	jclass Iterator = (*jni_env)->GetObjectClass(jni_env, deviceIterator);
 	jmethodID Iterator_hasNext = (*jni_env)->GetMethodID(
 		jni_env,
@@ -718,7 +718,7 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 
 static int android_jni_connect(struct libusb_device_handle *handle)
 {
-	struct linux_context_priv *cpriv = usbi_get_context_priv(handle->dev->ctx);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(HANDLE_CTX(handle));
 	JNIEnv *jni_env;
 	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK)
@@ -879,7 +879,7 @@ static int android_jni_connect(struct libusb_device_handle *handle)
 
 static void android_jni_disconnect(struct libusb_device_handle *dev_handle)
 {
-	struct linux_context_priv *cpriv = usbi_get_context_priv(dev_handle->dev->ctx);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(HANDLE_CTX(dev_handle));
 	JNIEnv *jni_env;
 	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
 	if (r != JNI_OK) {
@@ -2852,7 +2852,7 @@ static int op_release_interface(struct libusb_device_handle *handle, uint8_t int
 static void op_destroy_device(struct libusb_device *dev)
 {
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
-	struct linux_context_priv *cpriv = usbi_get_context_priv(dev->ctx);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(DEVICE_CTX(dev));
 
 #ifdef __ANDROID__
 	if (priv->android_jni_device != NULL) {
