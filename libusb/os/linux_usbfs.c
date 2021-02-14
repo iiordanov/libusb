@@ -546,6 +546,67 @@ static jobject android_jni_context(JNIEnv *jni_env)
 	return context;
 }
 
+static jobject android_jni_devices(JNIEnv *jni_env, jobject context)
+{
+	// UsbManager usbManager = context.getSystemService(Context.USB_SERVICE);
+	jclass Context = (*jni_env)->FindClass(jni_env, "android/content/Context");
+	jobject usbManager = (*jni_env)->CallObjectMethod(
+		jni_env,
+		context,
+		(*jni_env)->GetMethodID(
+			jni_env,
+			Context,
+			"getSystemService",
+			"(Ljava/lang/String;)Ljava/lang/Object;"
+		),
+		(*jni_env)->GetStaticObjectField(
+			jni_env,
+			Context,
+			(*jni_env)->GetStaticFieldID(
+				jni_env,
+				Context,
+				"USB_SERVICE",
+				"Ljava/lang/String;"
+			)
+		)
+	);
+
+	// HashMap<String, UsbDevice> deviceMap = usbManager.getDeviceList();
+	jclass UsbManager = (*jni_env)->GetObjectClass(jni_env, usbManager);
+	jobject deviceMap = (*jni_env)->CallObjectMethod(
+		jni_env,
+		usbManager,
+		(*jni_env)->GetMethodID(
+			jni_env,
+			UsbManager,
+			"getDeviceList",
+			"()Ljava/util/HashMap;"
+		)
+	);
+
+	// Collection<UsbDevice> deviceCollection = deviceMap.values();
+	jclass HashMap = (*jni_env)->GetObjectClass(jni_env, deviceMap);
+	jobject deviceCollection = (*jni_env)->CallObjectMethod(
+		jni_env,
+		deviceMap,
+		(*jni_env)->GetMethodID(
+			jni_env,
+			HashMap,
+			"values",
+			"()Ljava/util/Collection;"
+		)
+	);
+
+	return deviceCollection;
+}
+
+static void android_jni_devid2busdev(int deviceid, uint8_t *busnum, uint8_t *devaddr)
+{
+	/* https://android.googlesource.com/platform/system/core/+/master/libusbhost/usbhost.c */
+	*busnum = deviceid / 1000;
+	*devaddr = deviceid % 1000;
+}
+
 static int android_jni_scan_devices(struct libusb_context *ctx)
 {
 	/* Access and use the Android API via jni_env */
@@ -599,54 +660,8 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 		usbi_dbg("This device does not have the android.hardware.usb.host feature");
 		return LIBUSB_ERROR_NOT_SUPPORTED;
 	}
-	
-	// UsbManager usbManager = context.getSystemService(Context.USB_SERVICE);
-	jobject usbManager = (*jni_env)->CallObjectMethod(
-		jni_env,
-		context,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			Context,
-			"getSystemService",
-			"(Ljava/lang/String;)Ljava/lang/Object;"
-		),
-		(*jni_env)->GetStaticObjectField(
-			jni_env,
-			Context,
-			(*jni_env)->GetStaticFieldID(
-				jni_env,
-				Context,
-				"USB_SERVICE",
-				"Ljava/lang/String;"
-			)
-		)
-	);
 
-	// HashMap<String, UsbDevice> deviceMap = usbManager.getDeviceList();
-	jclass UsbManager = (*jni_env)->GetObjectClass(jni_env, usbManager);
-	jobject deviceMap = (*jni_env)->CallObjectMethod(
-		jni_env,
-		usbManager,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			UsbManager,
-			"getDeviceList",
-			"()Ljava/util/HashMap;"
-		)
-	);
-
-	// Collection<UsbDevice> deviceCollection = deviceMap.values();
-	jclass HashMap = (*jni_env)->GetObjectClass(jni_env, deviceMap);
-	jobject deviceCollection = (*jni_env)->CallObjectMethod(
-		jni_env,
-		deviceMap,
-		(*jni_env)->GetMethodID(
-			jni_env,
-			HashMap,
-			"values",
-			"()Ljava/util/Collection;"
-		)
-	);
+	jobject deviceCollection = android_jni_devices(jni_env, context);
 
 	// Iterator<UsbDevice> deviceIterator = deviceCollection.iterator();
 	jclass Collection = (*jni_env)->GetObjectClass(jni_env, deviceCollection);
@@ -701,12 +716,10 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 			UsbDevice_getDeviceId
 		);
 
-		/* The format for deviceid has always defaulted to bus * 1000 + dev, but I imagine a vendor can change this.
-		 * https://android.googlesource.com/platform/system/core/+/master/libusbhost/usbhost.c
-		 */
-		uint8_t dev = deviceid % 1000;
-		uint8_t bus = deviceid / 1000;
-		if (linux_enumerate_device(ctx, bus, dev, NULL, device)) {
+		uint8_t busnum, devaddr;
+		android_jni_devid2busdev(deviceid, &busnum, &devaddr);
+
+		if (linux_enumerate_device(ctx, busnum, devaddr, NULL)) {
 			usbi_dbg("failed to enumerate android device %d", deviceid);
 		}
 
@@ -1426,6 +1439,87 @@ static int android_jni_add_device_descriptors(JNIEnv *jni_env, struct linux_devi
 	return LIBUSB_SUCCESS;
 }
 
+static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busnum, uint8_t devaddr)
+{
+	JNIEnv *jni_env;
+	struct libusb_context *ctx = DEVICE_CTX(dev);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
+	struct linux_device_priv *priv = usbi_get_device_priv(dev);
+
+	int r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
+	if (r != JNI_OK)
+		return LIBUSB_ERROR_OTHER;
+
+	jobject context = android_jni_context(jni_env);
+	jobject deviceCollection = android_jni_devices(jni_env, context);
+
+	// Iterator<UsbDevice> deviceIterator = deviceCollection.iterator();
+	jclass Collection = (*jni_env)->GetObjectClass(jni_env, deviceCollection);
+	jobject deviceIterator = (*jni_env)->CallObjectMethod(
+		jni_env,
+		deviceCollection,
+		(*jni_env)->GetMethodID(
+			jni_env,
+			Collection,
+			"iterator",
+			"()Ljava/util/Iterator;"
+		)
+	);
+
+	// while (deviceIterator.hasNext()) { }
+	jclass Iterator = (*jni_env)->GetObjectClass(jni_env, deviceIterator);
+	jmethodID Iterator_hasNext = (*jni_env)->GetMethodID(
+		jni_env,
+		Iterator,
+		"hasNext",
+		"()Z"
+	);
+	jmethodID Iterator_next = (*jni_env)->GetMethodID(
+		jni_env,
+		Iterator,
+		"next",
+		"()Ljava/lang/Object;"
+	);
+	jclass UsbDevice = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDevice");
+	jmethodID UsbDevice_getDeviceId = (*jni_env)->GetMethodID(
+		jni_env,
+		UsbDevice,
+		"getDeviceId",
+		"()I"
+	);
+
+	while ((*jni_env)->CallBooleanMethod(jni_env, deviceIterator, Iterator_hasNext) && priv->android_jni_device == NULL) {
+		// UsbDevice device = deviceIterator.next();
+		jobject device = (*jni_env)->CallObjectMethod(
+			jni_env,
+			deviceIterator,
+			Iterator_next
+		);
+
+		// int deviceid = deviceobj.getDeviceId();
+		uint16_t deviceid = (*jni_env)->CallIntMethod(
+			jni_env,
+			device,
+			UsbDevice_getDeviceId
+		);
+
+		uint8_t devbusnum, devdevaddr;
+		android_jni_devid2busdev(deviceid, &devbusnum, &devdevaddr);
+
+		if (devbusnum == busnum && devdevaddr == devaddr) {
+			priv->android_jni_device = (*jni_env)->NewGlobalRef(jni_env, device);
+		}
+
+		(*jni_env)->DeleteLocalRef(jni_env, device);
+	}
+
+	r = android_jni_add_device_descriptors(jni_env, priv);
+	if (r < 0)
+		return r;
+
+	return LIBUSB_SUCCESS;
+}
+
 #endif
 
 static int linux_scan_devices(struct libusb_context *ctx)
@@ -1549,7 +1643,7 @@ static int sysfs_scan_device(struct libusb_context *ctx, const char *devname)
 	if (ret != LIBUSB_SUCCESS)
 		return ret;
 
-	return linux_enumerate_device(ctx, busnum, devaddr, devname, NULL);
+	return linux_enumerate_device(ctx, busnum, devaddr, devname);
 }
 
 /* read the bConfigurationValue for a device */
@@ -1879,7 +1973,7 @@ static enum libusb_speed usbfs_get_speed(struct libusb_context *ctx, int fd)
 }
 
 static int initialize_device(struct libusb_device *dev, uint8_t busnum,
-	uint8_t devaddr, const char *sysfs_dir, int wrapped_fd, void * platform_ptr)
+	uint8_t devaddr, const char *sysfs_dir, int wrapped_fd)
 {
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
 	struct libusb_context *ctx = DEVICE_CTX(dev);
@@ -1924,21 +2018,13 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 			return LIBUSB_ERROR_IO;
 		}
 #ifdef __ANDROID__
-	} else if (platform_ptr != NULL) {
-		JNIEnv *jni_env;
-		r = (*cpriv->android_javavm)->AttachCurrentThread(cpriv->android_javavm, &jni_env, NULL);
-		if (r != JNI_OK)
-			return LIBUSB_ERROR_OTHER;
-		priv->android_jni_device = (*jni_env)->NewGlobalRef(jni_env, platform_ptr);
-		r = android_jni_add_device_descriptors(jni_env, priv);
-		if (r < 0) {
+	} else if (cpriv->android_javavm != NULL) {
+		r = android_jni_initialize_device(dev, busnum, devaddr);
+		if (r < 0)
 			return r;
-		}
 		usbi_localize_device_descriptor(priv->descriptors);
 		fd = -1;
 		skip_fd = 1;
-#else
-		UNUSED(platform_ptr);
 #endif
 	} else {
 		fd = get_usbfs_fd(dev, O_RDONLY, 0);
@@ -2088,7 +2174,7 @@ retry:
 }
 
 int linux_enumerate_device(struct libusb_context *ctx,
-	uint8_t busnum, uint8_t devaddr, const char *sysfs_dir, void * platform_ptr)
+	uint8_t busnum, uint8_t devaddr, const char *sysfs_dir)
 {
 	unsigned long session_id;
 	struct libusb_device *dev;
@@ -2114,7 +2200,7 @@ int linux_enumerate_device(struct libusb_context *ctx,
 	if (!dev)
 		return LIBUSB_ERROR_NO_MEM;
 
-	r = initialize_device(dev, busnum, devaddr, sysfs_dir, -1, platform_ptr);
+	r = initialize_device(dev, busnum, devaddr, sysfs_dir, -1);
 	if (r < 0)
 		goto out;
 	r = usbi_sanitize_device(dev);
@@ -2139,7 +2225,7 @@ void linux_hotplug_enumerate(uint8_t busnum, uint8_t devaddr, const char *sys_na
 
 	usbi_mutex_static_lock(&active_contexts_lock);
 	for_each_context(ctx) {
-		linux_enumerate_device(ctx, busnum, devaddr, sys_name, NULL);
+		linux_enumerate_device(ctx, busnum, devaddr, sys_name);
 	}
 	usbi_mutex_static_unlock(&active_contexts_lock);
 }
@@ -2209,7 +2295,7 @@ static int usbfs_scan_busdir(struct libusb_context *ctx, uint8_t busnum)
 			continue;
 		}
 
-		if (linux_enumerate_device(ctx, busnum, devaddr, NULL, NULL)) {
+		if (linux_enumerate_device(ctx, busnum, devaddr, NULL)) {
 			usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
 			continue;
 		}
@@ -2246,7 +2332,7 @@ static int usbfs_get_device_list(struct libusb_context *ctx)
 			if (!is_usbdev_entry(entry->d_name, &busnum, &devaddr))
 				continue;
 
-			r = linux_enumerate_device(ctx, busnum, devaddr, NULL, NULL);
+			r = linux_enumerate_device(ctx, busnum, devaddr, NULL);
 			if (r < 0) {
 				usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
 				continue;
@@ -2367,7 +2453,7 @@ static int op_wrap_sys_device(struct libusb_context *ctx,
 	if (!dev)
 		return LIBUSB_ERROR_NO_MEM;
 
-	r = initialize_device(dev, busnum, devaddr, NULL, fd, NULL);
+	r = initialize_device(dev, busnum, devaddr, NULL, fd);
 	if (r < 0)
 		goto out;
 	r = usbi_sanitize_device(dev);
