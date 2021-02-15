@@ -23,6 +23,7 @@
 
 #include "libusbi.h"
 
+struct android_jni_context;
 struct android_jni_devices;
 
 /* from jni.h */
@@ -30,18 +31,25 @@ typedef const struct JNINativeInterface *JNIEnv;
 typedef const struct JNIInvokeInterface *JavaVM;
 typedef void *jobject;
 
-/* Converts a JNIEnv pointer into a JavaVM pointer, which is needed for the other calls.
+/* Converts a jni_env pointer to a javavm pointer, for utility. */
+int android_jnienv_javavm(JNIEnv *jni_env, JavaVM **javavm);
+
+/* Frees this android jni structure. */
+int android_jni_free(struct android_jni_context *jni);
+
+/* Prepares to use android jni calls.
  *
- * JNIEnv pointers are local to their context and shouldn't be stashed, but they are
- * more easy for a user to provide.
+ * It's possible to automatically find a running java vm without the user providing one,
+ * but it appears unreasonably difficult to do this until an ndk issue is resolved:
+ * https://github.com/android/ndk/issues/1320
  */
-int android_jni_javavm(JNIEnv *jni_env, JavaVM **javavm);
+int android_jni(JavaVM *javavm, struct android_jni_context **jni);
 
 /* Detects whether or not the platform supports usb host mode. */
-int android_jni_detect_usbhost(JavaVM *javavm, int *has_usbhost);
+int android_jni_detect_usbhost(struct android_jni_context *jni, int *has_usbhost);
 
 /* Prepares to iterate all connected devices. */
-int android_jni_devices_alloc(JavaVM *javavm, struct android_jni_devices **devices);
+int android_jni_devices_alloc(struct android_jni_context *jni, struct android_jni_devices **devices);
 
 /* Iterates through connected devices.
  *
@@ -61,7 +69,7 @@ void android_jni_devices_free(struct android_jni_devices *devices);
  *
  * The descriptors buffers should be freed with free().
  */
-int android_jni_gen_descriptors(JavaVM *javavm, jobject device, uint8_t **descriptors, size_t *descriptors_len, char **strings, size_t *strings_len);
+int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device, uint8_t **descriptors, size_t *descriptors_len, char **strings, size_t *strings_len);
 
 /* Connects to a device.
  *
@@ -77,12 +85,12 @@ int android_jni_gen_descriptors(JavaVM *javavm, jobject device, uint8_t **descri
  *
  *  TODO: separate the permission calls out to ease maintenance
  */
-int android_jni_connect(JavaVM *javavm, jobject device, jobject *connection, int *fd, uint8_t **descriptors, size_t *descriptors_len);
+int android_jni_connect(struct android_jni_context *jni, jobject device, jobject *connection, int *fd, uint8_t **descriptors, size_t *descriptors_len);
 
 /* Disconnects from a device. */
-int android_jni_disconnect(JavaVM *javavm, jobject connection);
+int android_jni_disconnect(struct android_jni_context *jni, jobject connection);
 
 /* Frees a global reference to an object. */
-void android_jni_globalunref(JavaVM *javavm, jobject *object);
+void android_jni_globalunref(struct android_jni_context *jni, jobject *object);
 
 #endif
