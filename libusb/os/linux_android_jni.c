@@ -26,6 +26,7 @@
 #include <jni.h>
 
 static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env);
+static int android_jni_fill_context_ids(struct android_jni_context *jni, JNIEnv *jni_env);
 static jobject android_jni_get_context(struct android_jni_context *jni, JNIEnv *jni_env);
 static int android_jni_gen_string(JNIEnv *jni_env, char **strings, size_t *strings_len, jstring str);
 static int android_jni_gen_endpoint(struct android_jni_context *jni, JNIEnv *jni_env, jobject endpoint, uint8_t **descriptors, size_t *descriptors_len);
@@ -90,83 +91,11 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 		return r;
 	}
 
-	jclass Collection = (*jni_env)->FindClass(jni_env, "java/util/Collection");
-	(*jni)->Collection_iterator = (*jni_env)->GetMethodID(jni_env, Collection, "iterator", "()Ljava/util/Iterator;");
-
-	jclass HashMap = (*jni_env)->FindClass(jni_env, "java/util/HashMap");
-	(*jni)->HashMap_values = (*jni_env)->GetMethodID(jni_env, HashMap, "values", "()Ljava/util/Collection;");
-	
-	jclass Iterator = (*jni_env)->FindClass(jni_env, "java/util/Iterator");
-	(*jni)->Iterator_hasNext = (*jni_env)->GetMethodID(jni_env, Iterator, "hasNext", "()Z");
-	(*jni)->Iterator_next = (*jni_env)->GetMethodID(jni_env, Iterator, "next", "()Ljava/lang/Object;");
-
-	jclass Build__VERSION = (*jni_env)->FindClass(jni_env, "android/os/Build$VERSION");
-	(*jni)->Build__VERSION__SDK_INT = (*jni_env)->GetStaticIntField(jni_env, Build__VERSION,
-		(*jni_env)->GetStaticFieldID(jni_env, Build__VERSION, "SDK_INT", "I")
-	);
-	(*jni)->Build__VERSION_CODES__P = 28;
-
-	(*jni)->Intent = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->FindClass(jni_env, "android/content/Intent"));
-	(*jni)->Intent_init = (*jni_env)->GetMethodID(jni_env, (*jni)->Intent, "<init>", "(Ljava/lang/String;)V");
-
-	jclass PackageManager = (*jni_env)->FindClass(jni_env, "android/content/pm/PackageManager");
-	(*jni)->PackageManager__FEATURE_USB_HOST = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->GetStaticObjectField(jni_env, PackageManager,
-		(*jni_env)->GetStaticFieldID(jni_env, PackageManager, "FEATURE_USB_HOST", "Ljava/lang/String;")
-	));
-	(*jni)->PackageManager_hasSystemFeature = (*jni_env)->GetMethodID(jni_env, PackageManager, "hasSystemFeature", "(Ljava/lang/String;)Z");
-
-	(*jni)->PendingIntent = (*jni_env)->FindClass(jni_env, "android/app/PendingIntent");
-	(*jni)->PendingIntent__getBroadcast = (*jni_env)->GetStaticMethodID(jni_env, (*jni)->PendingIntent, "getBroadcast", "(Landroid/content/Context;ILandroid/content/Intent;I)Landroid/app/PendingIntent;");
-
-	jclass UsbConfiguration = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbConfiguration");
-	(*jni)->UsbConfiguration_getInterfaceCount = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getInterfaceCount", "()I");
-	(*jni)->UsbConfiguration_getId = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getId", "()I");
-	(*jni)->UsbConfiguration_getName = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getName", "()Ljava/lang/String;");
-	(*jni)->UsbConfiguration_isSelfPowered = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "isSelfPowered", "()Z");
-	(*jni)->UsbConfiguration_isRemoteWakeup = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "isRemoteWakeup", "()Z");
-	(*jni)->UsbConfiguration_getMaxPower = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getMaxPower", "()I");
-	(*jni)->UsbConfiguration_getInterface = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getInterface", "(I)Landroid/hardware/usb/UsbInterface;");
-
-	jclass UsbDevice = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDevice");
-	(*jni)->UsbDevice_getDeviceId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceId", "()I");
-	(*jni)->UsbDevice_getConfigurationCount = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getConfigurationCount", "()I");
-	(*jni)->UsbDevice_getVersion = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getVersion", "()Ljava/lang/String;");
-	(*jni)->UsbDevice_getDeviceClass = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceClass", "()I");
-	(*jni)->UsbDevice_getDeviceSubclass = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceSubclass", "()I");
-	(*jni)->UsbDevice_getDeviceProtocol = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceProtocol", "()I");
-	(*jni)->UsbDevice_getVendorId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getVendorId", "()I");
-	(*jni)->UsbDevice_getProductId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getProductId", "()I");
-	(*jni)->UsbDevice_getManufacturerName = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getManufacturerName", "()Ljava/lang/String;");
-	(*jni)->UsbDevice_getProductName = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getProductName", "()Ljava/lang/String;");
-	(*jni)->UsbDevice_getSerialNumber = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getSerialNumber", "()Ljava/lang/String;");
-	(*jni)->UsbDevice_getConfiguration = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getConfiguration", "(I)Landroid/hardware/usb/UsbConfiguration;");
-
-	jclass UsbDeviceConnection = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDeviceConnection");
-	(*jni)->UsbDeviceConnection_close = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "close", "()V");
-	(*jni)->UsbDeviceConnection_getFileDescriptor = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getFileDescriptor", "()I");
-	(*jni)->UsbDeviceConnection_getRawDescriptors = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getRawDescriptors", "()[B");
-
-	jclass UsbEndpoint = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbEndpoint");
-	(*jni)->UsbEndpoint_getAddress = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getAddress", "()I");
-	(*jni)->UsbEndpoint_getAttributes = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getAttributes", "()I");
-	(*jni)->UsbEndpoint_getMaxPacketSize = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getMaxPacketSize", "()I");
-	(*jni)->UsbEndpoint_getInterval = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getInterval", "()I");
-
-	jclass UsbInterface = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbInterface");
-	(*jni)->UsbInterface_getEndpointCount = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getEndpointCount", "()I");
-	(*jni)->UsbInterface_getId = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getId", "()I");
-	(*jni)->UsbInterface_getAlternateSetting = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getAlternateSetting", "()I");
-	(*jni)->UsbInterface_getInterfaceClass = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getInterfaceClass", "()I");
-	(*jni)->UsbInterface_getInterfaceSubclass = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getInterfaceSubclass", "()I");
-	(*jni)->UsbInterface_getInterfaceProtocol = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getInterfaceProtocol", "()I");
-	(*jni)->UsbInterface_getName = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getName", "()Ljava/lang/String;");
-	(*jni)->UsbInterface_getEndpoint = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getEndpoint", "(I)Landroid/hardware/usb/UsbEndpoint;");
-
-	jclass UsbManager = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbManager");
-	(*jni)->UsbManager_getDeviceList = (*jni_env)->GetMethodID(jni_env, UsbManager, "getDeviceList", "()Ljava/util/HashMap;");
-	(*jni)->UsbManager_hasPermission = (*jni_env)->GetMethodID(jni_env, UsbManager, "hasPermission", "(Landroid/hardware/usb/UsbDevice;)Z");
-	(*jni)->UsbManager_openDevice = (*jni_env)->GetMethodID(jni_env, UsbManager, "openDevice", "(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;");
-	(*jni)->UsbManager_requestPermission = (*jni_env)->GetMethodID(jni_env, UsbManager, "requestPermission", "(Landroid/hardware/usb/UsbDevice;Landroid/app/PendingIntent;)V");
+    r = android_jni_fill_context_ids(*jni, jni_env);
+	if (r != LIBUSB_SUCCESS) {
+		free(*jni);
+		return r;
+	}
 
 	/* ActivityThread activityThread = ActivityThread.currentActivityThread(); */
 	jclass ActivityThread = (*jni_env)->FindClass(jni_env, "android/app/ActivityThread");
@@ -193,18 +122,6 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 	(*jni_env)->DeleteLocalRef(jni_env, Context);
 	(*jni_env)->DeleteLocalRef(jni_env, Context__USB_SERVICE);
 	(*jni_env)->DeleteLocalRef(jni_env, ActivityThread);
-	(*jni_env)->DeleteLocalRef(jni_env, UsbManager);
-	(*jni_env)->DeleteLocalRef(jni_env, UsbInterface);
-	(*jni_env)->DeleteLocalRef(jni_env, UsbEndpoint);
-	(*jni_env)->DeleteLocalRef(jni_env, UsbDeviceConnection);
-	(*jni_env)->DeleteLocalRef(jni_env, UsbDevice);
-	(*jni_env)->DeleteLocalRef(jni_env, UsbConfiguration);
-	(*jni_env)->DeleteLocalRef(jni_env, PackageManager);
-	(*jni_env)->DeleteLocalRef(jni_env, Build__VERSION);
-
-	(*jni_env)->DeleteLocalRef(jni_env, Iterator);
-	(*jni_env)->DeleteLocalRef(jni_env, HashMap);
-	(*jni_env)->DeleteLocalRef(jni_env, Collection);
 
 	return LIBUSB_SUCCESS;
 }
@@ -727,6 +644,101 @@ static int android_jni_gen_string(JNIEnv *jni_env, char **strings, size_t *strin
 	(*jni_env)->ReleaseStringChars(jni_env, str, str_ptr);
 
 	return idx;
+}
+
+static int android_jni_fill_context_ids(struct android_jni_context *jni, JNIEnv *jni_env)
+{
+	jclass Collection = (*jni_env)->FindClass(jni_env, "java/util/Collection");
+	jni->Collection_iterator = (*jni_env)->GetMethodID(jni_env, Collection, "iterator", "()Ljava/util/Iterator;");
+
+	jclass HashMap = (*jni_env)->FindClass(jni_env, "java/util/HashMap");
+	jni->HashMap_values = (*jni_env)->GetMethodID(jni_env, HashMap, "values", "()Ljava/util/Collection;");
+	
+	jclass Iterator = (*jni_env)->FindClass(jni_env, "java/util/Iterator");
+	jni->Iterator_hasNext = (*jni_env)->GetMethodID(jni_env, Iterator, "hasNext", "()Z");
+	jni->Iterator_next = (*jni_env)->GetMethodID(jni_env, Iterator, "next", "()Ljava/lang/Object;");
+
+	jclass Build__VERSION = (*jni_env)->FindClass(jni_env, "android/os/Build$VERSION");
+	jni->Build__VERSION__SDK_INT = (*jni_env)->GetStaticIntField(jni_env, Build__VERSION,
+		(*jni_env)->GetStaticFieldID(jni_env, Build__VERSION, "SDK_INT", "I")
+	);
+	jni->Build__VERSION_CODES__P = 28;
+
+	jni->Intent = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->FindClass(jni_env, "android/content/Intent"));
+	jni->Intent_init = (*jni_env)->GetMethodID(jni_env, jni->Intent, "<init>", "(Ljava/lang/String;)V");
+
+	jclass PackageManager = (*jni_env)->FindClass(jni_env, "android/content/pm/PackageManager");
+	jni->PackageManager__FEATURE_USB_HOST = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->GetStaticObjectField(jni_env, PackageManager,
+		(*jni_env)->GetStaticFieldID(jni_env, PackageManager, "FEATURE_USB_HOST", "Ljava/lang/String;")
+	));
+	jni->PackageManager_hasSystemFeature = (*jni_env)->GetMethodID(jni_env, PackageManager, "hasSystemFeature", "(Ljava/lang/String;)Z");
+
+	jni->PendingIntent = (*jni_env)->FindClass(jni_env, "android/app/PendingIntent");
+	jni->PendingIntent__getBroadcast = (*jni_env)->GetStaticMethodID(jni_env, jni->PendingIntent, "getBroadcast", "(Landroid/content/Context;ILandroid/content/Intent;I)Landroid/app/PendingIntent;");
+
+	jclass UsbConfiguration = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbConfiguration");
+	jni->UsbConfiguration_getInterfaceCount = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getInterfaceCount", "()I");
+	jni->UsbConfiguration_getId = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getId", "()I");
+	jni->UsbConfiguration_getName = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getName", "()Ljava/lang/String;");
+	jni->UsbConfiguration_isSelfPowered = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "isSelfPowered", "()Z");
+	jni->UsbConfiguration_isRemoteWakeup = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "isRemoteWakeup", "()Z");
+	jni->UsbConfiguration_getMaxPower = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getMaxPower", "()I");
+	jni->UsbConfiguration_getInterface = (*jni_env)->GetMethodID(jni_env, UsbConfiguration, "getInterface", "(I)Landroid/hardware/usb/UsbInterface;");
+
+	jclass UsbDevice = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDevice");
+	jni->UsbDevice_getDeviceId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceId", "()I");
+	jni->UsbDevice_getConfigurationCount = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getConfigurationCount", "()I");
+	jni->UsbDevice_getVersion = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getVersion", "()Ljava/lang/String;");
+	jni->UsbDevice_getDeviceClass = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceClass", "()I");
+	jni->UsbDevice_getDeviceSubclass = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceSubclass", "()I");
+	jni->UsbDevice_getDeviceProtocol = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getDeviceProtocol", "()I");
+	jni->UsbDevice_getVendorId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getVendorId", "()I");
+	jni->UsbDevice_getProductId = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getProductId", "()I");
+	jni->UsbDevice_getManufacturerName = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getManufacturerName", "()Ljava/lang/String;");
+	jni->UsbDevice_getProductName = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getProductName", "()Ljava/lang/String;");
+	jni->UsbDevice_getSerialNumber = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getSerialNumber", "()Ljava/lang/String;");
+	jni->UsbDevice_getConfiguration = (*jni_env)->GetMethodID(jni_env, UsbDevice, "getConfiguration", "(I)Landroid/hardware/usb/UsbConfiguration;");
+
+	jclass UsbDeviceConnection = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbDeviceConnection");
+	jni->UsbDeviceConnection_close = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "close", "()V");
+	jni->UsbDeviceConnection_getFileDescriptor = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getFileDescriptor", "()I");
+	jni->UsbDeviceConnection_getRawDescriptors = (*jni_env)->GetMethodID(jni_env, UsbDeviceConnection, "getRawDescriptors", "()[B");
+
+	jclass UsbEndpoint = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbEndpoint");
+	jni->UsbEndpoint_getAddress = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getAddress", "()I");
+	jni->UsbEndpoint_getAttributes = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getAttributes", "()I");
+	jni->UsbEndpoint_getMaxPacketSize = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getMaxPacketSize", "()I");
+	jni->UsbEndpoint_getInterval = (*jni_env)->GetMethodID(jni_env, UsbEndpoint, "getInterval", "()I");
+
+	jclass UsbInterface = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbInterface");
+	jni->UsbInterface_getEndpointCount = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getEndpointCount", "()I");
+	jni->UsbInterface_getId = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getId", "()I");
+	jni->UsbInterface_getAlternateSetting = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getAlternateSetting", "()I");
+	jni->UsbInterface_getInterfaceClass = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getInterfaceClass", "()I");
+	jni->UsbInterface_getInterfaceSubclass = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getInterfaceSubclass", "()I");
+	jni->UsbInterface_getInterfaceProtocol = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getInterfaceProtocol", "()I");
+	jni->UsbInterface_getName = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getName", "()Ljava/lang/String;");
+	jni->UsbInterface_getEndpoint = (*jni_env)->GetMethodID(jni_env, UsbInterface, "getEndpoint", "(I)Landroid/hardware/usb/UsbEndpoint;");
+
+	jclass UsbManager = (*jni_env)->FindClass(jni_env, "android/hardware/usb/UsbManager");
+	jni->UsbManager_getDeviceList = (*jni_env)->GetMethodID(jni_env, UsbManager, "getDeviceList", "()Ljava/util/HashMap;");
+	jni->UsbManager_hasPermission = (*jni_env)->GetMethodID(jni_env, UsbManager, "hasPermission", "(Landroid/hardware/usb/UsbDevice;)Z");
+	jni->UsbManager_openDevice = (*jni_env)->GetMethodID(jni_env, UsbManager, "openDevice", "(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;");
+	jni->UsbManager_requestPermission = (*jni_env)->GetMethodID(jni_env, UsbManager, "requestPermission", "(Landroid/hardware/usb/UsbDevice;Landroid/app/PendingIntent;)V");
+
+	(*jni_env)->DeleteLocalRef(jni_env, UsbManager);
+	(*jni_env)->DeleteLocalRef(jni_env, UsbInterface);
+	(*jni_env)->DeleteLocalRef(jni_env, UsbEndpoint);
+	(*jni_env)->DeleteLocalRef(jni_env, UsbDeviceConnection);
+	(*jni_env)->DeleteLocalRef(jni_env, UsbDevice);
+	(*jni_env)->DeleteLocalRef(jni_env, UsbConfiguration);
+	(*jni_env)->DeleteLocalRef(jni_env, PackageManager);
+	(*jni_env)->DeleteLocalRef(jni_env, Build__VERSION);
+
+	(*jni_env)->DeleteLocalRef(jni_env, Iterator);
+	(*jni_env)->DeleteLocalRef(jni_env, HashMap);
+	(*jni_env)->DeleteLocalRef(jni_env, Collection);
+    return LIBUSB_SUCCESS;
 }
 
 static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env)
