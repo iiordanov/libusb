@@ -54,6 +54,15 @@ int android_jni_devices_next(struct android_jni_devices *devices, jobject *devic
 /* Frees a device iteration structure. */
 void android_jni_devices_free(struct android_jni_devices *devices);
 
+/* Without connecting to a device, generates descriptors for that device.  The
+ * descriptors are generated from the information available in the android api,
+ * which itself is generated from the real descriptors but does not include
+ * everything.
+ *
+ * The descriptors buffers should be freed with free().
+ */
+int android_jni_gen_descriptors(JavaVM *javavm, jobject device, uint8_t **descriptors, size_t *descriptors_len, char **strings, size_t *strings_len);
+
 /* Connects to a device.
  *
  * The connection jobject should be freed with android_jni_globalunref().
@@ -68,7 +77,7 @@ void android_jni_devices_free(struct android_jni_devices *devices);
  *
  *  TODO: separate the permission calls out to ease maintenance
  */
-int android_jni_connect(JavaVM *javavm, jobject device, jobject *connection, int *fd, int8_t **descriptors, int *descriptors_len);
+int android_jni_connect(JavaVM *javavm, jobject device, jobject *connection, int *fd, uint8_t **descriptors, size_t *descriptors_len);
 
 /* Disconnects from a device. */
 int android_jni_disconnect(JavaVM *javavm, jobject connection);
