@@ -77,7 +77,13 @@ int android_jnienv_javavm(JNIEnv *jni_env, JavaVM **javavm)
 
 int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 {
+	int r;
 	JNIEnv *jni_env;
+
+	jclass ActivityThread, Context;
+	jmethodID ActivityThread__currentActivityThread, ActivityThread_getApplication;
+	jmethodID Context_getPackageManager, Context_getSystemService;
+	jobject activity_thread, Context__USB_SERVICE;
 
 	*jni = malloc(sizeof(struct android_jni_context));
 	if (*jni == NULL)
@@ -85,31 +91,31 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 
 	(*jni)->javavm = javavm;
 
-	int r = android_jni_env(*jni, &jni_env);
+	r = android_jni_env(*jni, &jni_env);
 	if (r != LIBUSB_SUCCESS) {
 		free(*jni);
 		return r;
 	}
 
-    r = android_jni_fill_context_ids(*jni, jni_env);
+	r = android_jni_fill_context_ids(*jni, jni_env);
 	if (r != LIBUSB_SUCCESS) {
 		free(*jni);
 		return r;
 	}
 
-	/* ActivityThread activityThread = ActivityThread.currentActivityThread(); */
-	jclass ActivityThread = (*jni_env)->FindClass(jni_env, "android/app/ActivityThread");
-	jmethodID ActivityThread__currentActivityThread = (*jni_env)->GetStaticMethodID(jni_env, ActivityThread, "currentActivityThread", "()Landroid/app/ActivityThread;");
-	jmethodID ActivityThread_getApplication = (*jni_env)->GetMethodID(jni_env, ActivityThread, "getApplication", "()Landroid/app/Application;");
-	jobject activityThread = (*jni_env)->CallStaticObjectMethod(jni_env, ActivityThread, ActivityThread__currentActivityThread);
+	/* ActivityThread activity_thread = ActivityThread.currentActivityThread(); */
+	ActivityThread = (*jni_env)->FindClass(jni_env, "android/app/ActivityThread");
+	ActivityThread__currentActivityThread = (*jni_env)->GetStaticMethodID(jni_env, ActivityThread, "currentActivityThread", "()Landroid/app/ActivityThread;");
+	ActivityThread_getApplication = (*jni_env)->GetMethodID(jni_env, ActivityThread, "getApplication", "()Landroid/app/Application;");
+	activity_thread = (*jni_env)->CallStaticObjectMethod(jni_env, ActivityThread, ActivityThread__currentActivityThread);
 
-	/* Context application_context = activityThread.getApplication(); */
-	(*jni)->application_context = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->CallObjectMethod(jni_env, activityThread, ActivityThread_getApplication));
+	/* Context application_context = activity_thread.getApplication(); */
+	(*jni)->application_context = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->CallObjectMethod(jni_env, activity_thread, ActivityThread_getApplication));
 
-	jclass Context = (*jni_env)->FindClass(jni_env, "android/content/Context");
-	jobject Context__USB_SERVICE = (*jni_env)->GetStaticObjectField(jni_env, Context, (*jni_env)->GetStaticFieldID(jni_env, Context, "USB_SERVICE", "Ljava/lang/String;"));
-	jmethodID Context_getPackageManager = (*jni_env)->GetMethodID(jni_env, Context, "getPackageManager", "()Landroid/content/pm/PackageManager;");
-	jmethodID Context_getSystemService = (*jni_env)->GetMethodID(jni_env, Context, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
+	Context = (*jni_env)->FindClass(jni_env, "android/content/Context");
+	Context__USB_SERVICE = (*jni_env)->GetStaticObjectField(jni_env, Context, (*jni_env)->GetStaticFieldID(jni_env, Context, "USB_SERVICE", "Ljava/lang/String;"));
+	Context_getPackageManager = (*jni_env)->GetMethodID(jni_env, Context, "getPackageManager", "()Landroid/content/pm/PackageManager;");
+	Context_getSystemService = (*jni_env)->GetMethodID(jni_env, Context, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
 
 	/* PackageManager package_manager = application_context.getPackageManager(); */
 	(*jni)->package_manager = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->CallObjectMethod(jni_env, (*jni)->application_context, Context_getPackageManager));
@@ -128,9 +134,10 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 
 int android_jni_free(struct android_jni_context *jni)
 {
+	int r;
 	JNIEnv *jni_env;
 
-	int r = android_jni_env(jni, &jni_env);
+	r = android_jni_env(jni, &jni_env);
 	if (r != LIBUSB_SUCCESS)
 		free(jni);
 		return r;
@@ -218,10 +225,9 @@ int android_jni_devices_next(struct android_jni_devices *devices, jobject *devic
 		return r;
 
 	/* if (!deviceIterator.hasNext()) */
-	if (!(*jni_env)->CallBooleanMethod(jni_env, deviceIterator, jni->Iterator_hasNext)) {
+	if (!(*jni_env)->CallBooleanMethod(jni_env, deviceIterator, jni->Iterator_hasNext))
 
 		return LIBUSB_ERROR_NOT_FOUND;
-	}
 
 	/* UsbDevice local_device = deviceIterator.next(); */
 	local_device = (*jni_env)->CallObjectMethod(jni_env, deviceIterator, jni->Iterator_next);
@@ -327,15 +333,12 @@ int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
 			(*jni_env)->CallObjectMethod(jni_env, device, jni->UsbDevice_getSerialNumber)),
 		.bNumConfigurations = num_configs,
 	};
-	if (desc.iManufacturer < 0) {
+	if (desc.iManufacturer < 0)
 		return desc.iManufacturer;
-	}
-	if (desc.iProduct < 0) {
+	if (desc.iProduct < 0)
 		return desc.iProduct;
-	}
-	if (desc.iSerialNumber < 0) {
+	if (desc.iSerialNumber < 0)
 		return desc.iSerialNumber;
-	}
 	*(struct usbi_device_descriptor *)*descriptors = desc;
 
 	for (idx = 0; idx < num_configs; idx ++) {
@@ -467,7 +470,7 @@ int android_jni_disconnect(struct android_jni_context *jni, jobject connection)
 	return LIBUSB_SUCCESS;
 }
 
-void android_jni_globalunref(struct android_jni_context *jni, jobject *object)
+void android_jni_globalunref(struct android_jni_context *jni, jobject object)
 {
 	int r;
 	JNIEnv *jni_env;
@@ -509,9 +512,8 @@ static int android_jni_gen_configuration(struct android_jni_context *jni, JNIEnv
 			 ? 0x20 : 0),
 		.bMaxPower = (*jni_env)->CallIntMethod(jni_env, config, jni->UsbConfiguration_getMaxPower) / 2
 	};
-	if (desc.iConfiguration < 0) {
+	if (desc.iConfiguration < 0)
 		return desc.iConfiguration;
-	}
 
 	for (idx = 0; idx < num_ifaces; ++ idx) {
 		/* UsbInterface interface = config.getInterface(idx); */
@@ -558,9 +560,8 @@ int android_jni_gen_interface(struct android_jni_context *jni, JNIEnv *jni_env, 
 		.iInterface = android_jni_gen_string(jni_env, strings, strings_len,
 			(*jni_env)->CallObjectMethod(jni_env, interface, jni->UsbInterface_getName))
 	};
-	if (desc.iInterface < 0) {
+	if (desc.iInterface < 0)
 		return desc.iInterface;
-	}
 	*(struct usbi_interface_descriptor *)(*descriptors + offset) = desc;
 
 	if (desc.bInterfaceNumber >= *num_ifaces)
@@ -611,9 +612,8 @@ static int android_jni_gen_string(JNIEnv *jni_env, char **strings, size_t *strin
 	const uint16_t *str_ptr;
 	struct usbi_string_descriptor *desc;
 
-	if ((*jni_env)->IsSameObject(jni_env, str, NULL) ) {
+	if ((*jni_env)->IsSameObject(jni_env, str, NULL))
 		return 0;
-	}
 
 	str_ptr = (*jni_env)->GetStringChars(jni_env, str, NULL);
 	str_len = (*jni_env)->GetStringLength(jni_env, str) * sizeof(str_ptr[0]);
@@ -621,9 +621,8 @@ static int android_jni_gen_string(JNIEnv *jni_env, char **strings, size_t *strin
 	for (offset = 0, idx = 0; offset < *strings_len; offset += desc->bLength, ++ idx) {
 		desc = (struct usbi_string_descriptor *)(*strings + offset);
 		if (desc->bLength - 2 == str_len) {
-			if (memcmp(desc->wData, str_ptr, str_len) == 0) {
+			if (memcmp(desc->wData, str_ptr, str_len) == 0)
 				break;
-			}
 		}
 	}
 
@@ -738,7 +737,7 @@ static int android_jni_fill_context_ids(struct android_jni_context *jni, JNIEnv 
 	(*jni_env)->DeleteLocalRef(jni_env, Iterator);
 	(*jni_env)->DeleteLocalRef(jni_env, HashMap);
 	(*jni_env)->DeleteLocalRef(jni_env, Collection);
-    return LIBUSB_SUCCESS;
+	return LIBUSB_SUCCESS;
 }
 
 static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env)

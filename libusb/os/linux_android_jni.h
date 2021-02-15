@@ -1,7 +1,5 @@
 /*
  * android_jni interface
- * Copyright © 2007 Daniel Drake <dsd@gentoo.org>
- * Copyright © 2001 Johannes Erdfelt <johannes@erdfelt.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -104,6 +102,6 @@ int android_jni_connect(struct android_jni_context *jni, jobject device, jobject
 int android_jni_disconnect(struct android_jni_context *jni, jobject connection);
 
 /* Frees a global reference to an object. */
-void android_jni_globalunref(struct android_jni_context *jni, jobject *object);
+void android_jni_globalunref(struct android_jni_context *jni, jobject object);
 
 #endif
