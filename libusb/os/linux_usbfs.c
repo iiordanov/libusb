@@ -567,8 +567,11 @@ static int get_android_jni_fd(struct libusb_device_handle *handle)
 		&descriptors,
 		&descriptors_len
 	);
-	if (r != LIBUSB_SUCCESS)
+	if (r != LIBUSB_SUCCESS) {
+		if (r == LIBUSB_ERROR_ACCESS)
+			android_jni_request_permission(cpriv->android_jni, priv->android_jni_device);
 		return r;
+	}
 
 	free(priv->descriptors);
 	priv->descriptors = descriptors;

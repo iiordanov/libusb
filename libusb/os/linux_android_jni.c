@@ -45,6 +45,8 @@ struct android_jni_context
 	jobject package_manager;
 	jobject usb_manager;
 
+	jstring permission_action;
+
 	/* ids do not need global references */
 	jmethodID Collection_iterator;
 	jmethodID HashMap_values;
@@ -186,6 +188,8 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 	/* UsbManager usb_manager = application_context.getSystemService(Context.USB_SERVICE); */
 	(*jni)->usb_manager = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->CallObjectMethod(jni_env, (*jni)->application_context, Context_getSystemService, Context__USB_SERVICE));
 
+	(*jni)->permission_action = (*jni_env)->NewGlobalRef(jni_env, (*jni_env)->NewStringUTF(jni_env, "libusb.android.USB_PERMISSION"));
+
 	(*jni_env)->DeleteLocalRef(jni_env, Context);
 	(*jni_env)->DeleteLocalRef(jni_env, Context__USB_SERVICE);
 	(*jni_env)->DeleteLocalRef(jni_env, ActivityThread);
@@ -222,6 +226,8 @@ int android_jni_free(struct android_jni_context *jni)
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->application_context);
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->package_manager);
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->usb_manager);
+
+	(*jni_env)->DeleteGlobalRef(jni_env, jni->permission_action);
 
 	free(jni);
 }
@@ -430,11 +436,52 @@ int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
 	return LIBUSB_SUCCESS;
 }
 
+int android_jni_detect_permission(struct android_jni_context *jni, jobject device, int *has_permission)
+{
+	int r;
+	JNIEnv *jni_env;
+
+	r = android_jni_env(jni, &jni_env);
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	/* boolean has_permission = usb_manager.hasPermission(device); */
+	*has_permission = (*jni_env)->CallBooleanMethod(jni_env, jni->usb_manager, jni->UsbManager_hasPermission, device);
+
+	return LIBUSB_SUCCESS;
+}
+
+int android_jni_request_permission(struct android_jni_context *jni, jobject device)
+{
+	int r;
+	JNIEnv *jni_env;
+	jobject intent, permission_intent;
+
+	r = android_jni_env(jni, &jni_env);
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	/* Intent intent = new Intent(permission_action); */
+	intent = (*jni_env)->NewObject(jni_env, jni->Intent, jni->Intent_init, jni->permission_action);
+
+	/* PendingIntent permission_intent = PendingIntent.getBroadcast(application_context, 0, intent, 0); */
+	permission_intent = (*jni_env)->CallStaticObjectMethod(jni_env, jni->PendingIntent, jni->PendingIntent__getBroadcast, jni->application_context, 0, intent, 0);
+
+	(*jni_env)->DeleteLocalRef(jni_env, intent);
+
+	/* usb_manager.requestPermission(device, permission_intent); */
+	(*jni_env)->CallVoidMethod(jni_env, jni->usb_manager, jni->UsbManager_requestPermission, device, permission_intent);
+
+	(*jni_env)->DeleteLocalRef(jni_env, permission_intent);
+
+	return LIBUSB_SUCCESS;
+}
+
 int android_jni_connect(struct android_jni_context *jni, jobject device, jobject *connection, int *fd, uint8_t **descriptors, size_t *descriptors_len)
 {
-	int permission, r;
+	int has_permission, r;
 	JNIEnv *jni_env;
-	jobject intent, permissionIntent, local_connection;
+	jobject local_connection;
 	jbyteArray local_descriptors;
 	jbyte * local_descriptors_ptr;
 
@@ -442,25 +489,13 @@ int android_jni_connect(struct android_jni_context *jni, jobject device, jobject
 	if (r != LIBUSB_SUCCESS)
 		return r;
 
-	/* boolean permission = usb_manager.hasPermission(device); */
-	permission = (*jni_env)->CallBooleanMethod(jni_env, jni->usb_manager, jni->UsbManager_hasPermission, device);
+	r = android_jni_detect_permission(jni, device, &has_permission);
 
-	if (!permission) {
+	if (r != LIBUSB_SUCCESS)
+		return r;
 
-		/* Intent intent = new Intent("libusb.android.USB_PERMISSION"); */
-		intent = (*jni_env)->NewObject(jni_env, jni->Intent, jni->Intent_init, (*jni_env)->NewStringUTF(jni_env, "libusb.android.USB_PERMISSION"));
-
-		/* PendingIntent permissionIntent = PendingIntent.getBroadcast(context, 0, intent, 0); */
-		permissionIntent = (*jni_env)->CallStaticObjectMethod(jni_env, jni->PendingIntent, jni->PendingIntent__getBroadcast, jni->application_context, 0, intent, 0);
-
-		(*jni_env)->DeleteLocalRef(jni_env, intent);
-
-		(*jni_env)->CallVoidMethod(jni_env, jni->usb_manager, jni->UsbManager_requestPermission, device, permissionIntent);
-
-		(*jni_env)->DeleteLocalRef(jni_env, permissionIntent);
-
+	if (!has_permission)
 		return LIBUSB_ERROR_ACCESS;
-	}
 
 	/* UsbDeviceConnection local_connection = usb_manager.openDevice(device); */
 	local_connection = (*jni_env)->CallObjectMethod(jni_env, jni->usb_manager, jni->UsbManager_openDevice, device);
