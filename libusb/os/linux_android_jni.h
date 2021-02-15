@@ -38,9 +38,9 @@ int android_jnienv_javavm(JNIEnv *jni_env, JavaVM **javavm);
  *
  * The jni structure should be freed with android_jni_free().
  *
- * It's possible to automatically find a running java vm without the user providing one,
- * but it appears unreasonably difficult to do this until an ndk issue is resolved:
- * https://github.com/android/ndk/issues/1320
+ * It's possible to automatically find a running java vm without the user
+ * providing one, but it appears unreasonably difficult to do this until an ndk
+ * issue is resolved: https://github.com/android/ndk/issues/1320
  */
 int android_jni(JavaVM *javavm, struct android_jni_context **jni);
 
@@ -48,10 +48,12 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni);
 int android_jni_free(struct android_jni_context *jni);
 
 /* Detects whether or not the platform supports usb host mode. */
-int android_jni_detect_usbhost(struct android_jni_context *jni, int *has_usbhost);
+int android_jni_detect_usbhost(struct android_jni_context *jni,
+                               int *has_usbhost);
 
 /* Prepares to iterate all connected devices. */
-int android_jni_devices_alloc(struct android_jni_context *jni, struct android_jni_devices **devices);
+int android_jni_devices_alloc(struct android_jni_context *jni,
+                              struct android_jni_devices **devices);
 
 /* Iterates through connected devices.
  *
@@ -59,7 +61,8 @@ int android_jni_devices_alloc(struct android_jni_context *jni, struct android_jn
  *
  * Returns LIBUSB_ERROR_NOT_FOUND when all devices have been enumerated.
  */
-int android_jni_devices_next(struct android_jni_devices *devices, jobject *device, uint8_t *busnum, uint8_t *devaddr);
+int android_jni_devices_next(struct android_jni_devices *devices,
+                             jobject *device, uint8_t *busnum, uint8_t *devaddr);
 
 /* Frees a device iteration structure. */
 void android_jni_devices_free(struct android_jni_devices *devices);
@@ -71,10 +74,13 @@ void android_jni_devices_free(struct android_jni_devices *devices);
  *
  * The descriptors and strings buffers should be freed with free().
  */
-int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device, uint8_t **descriptors, size_t *descriptors_len, char **strings, size_t *strings_len);
+int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
+                                uint8_t **descriptors, size_t *descriptors_len,
+                                char **strings, size_t *strings_len);
 
 /* Detects whether or not the application has permission to connect to a device. */
-int android_jni_detect_permission(struct android_jni_context *jni, jobject device, int *has_permission);
+int android_jni_detect_permission(struct android_jni_context *jni, jobject device,
+                                  int *has_permission);
 
 /* Requests permission from the user to connect to a device.
  *
@@ -96,7 +102,8 @@ int android_jni_request_permission(struct android_jni_context *jni, jobject devi
  *
  * If permission is needed, LIBUSB_ERROR_ACCESS is returned.
  */
-int android_jni_connect(struct android_jni_context *jni, jobject device, jobject *connection, int *fd, uint8_t **descriptors, size_t *descriptors_len);
+int android_jni_connect(struct android_jni_context *jni, jobject device, jobject *connection,
+                        int *fd, uint8_t **descriptors, size_t *descriptors_len);
 
 /* Disconnects from a device. */
 int android_jni_disconnect(struct android_jni_context *jni, jobject connection);

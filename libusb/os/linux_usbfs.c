@@ -494,7 +494,7 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
 		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
 		int r = android_jnienv_javavm(jni_env, &android_default_javavm);
-		usbi_dbg("set default jnienv pointer %p javavm pointer %p", jni_env, android_default_javavm);
+		usbi_dbg("set default jnienv javavm %p %p", jni_env, android_default_javavm);
 		return r;
 	}
 #else
@@ -535,9 +535,11 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 	if (r != LIBUSB_SUCCESS)
 		return r;
 	
-	while (android_jni_devices_next(devices, &device, &busnum, &devaddr) == LIBUSB_SUCCESS) {
+	while (LIBUSB_SUCCESS ==
+		android_jni_devices_next(devices, &device, &busnum, &devaddr))
+	{
 
-		if (linux_enumerate_device(ctx, busnum, devaddr, NULL) != LIBUSB_SUCCESS)
+		if (linux_enumerate_device(ctx, busnum, devaddr, NULL) < 0)
 			usbi_dbg("failed to enumerate android device %d/%d", busnum, devaddr);
 	
 		android_jni_globalunref(cpriv->android_jni, device);
@@ -559,14 +561,8 @@ static int get_android_jni_fd(struct libusb_device_handle *handle)
 	uint8_t *descriptors;
 	size_t descriptors_len;
 
-	r = android_jni_connect(
-		cpriv->android_jni,
-		priv->android_jni_device,
-		&hpriv->android_jni_connection,
-		&fd,
-		&descriptors,
-		&descriptors_len
-	);
+	r = android_jni_connect(cpriv->android_jni, priv->android_jni_device,
+		&hpriv->android_jni_connection, &fd, &descriptors, &descriptors_len);
 	if (r != LIBUSB_SUCCESS) {
 		if (r == LIBUSB_ERROR_ACCESS)
 			android_jni_request_permission(cpriv->android_jni, priv->android_jni_device);
@@ -577,8 +573,8 @@ static int get_android_jni_fd(struct libusb_device_handle *handle)
 	priv->descriptors = descriptors;
 	priv->descriptors_len = descriptors_len;
 
-	/* right now android_jni_device is only filled if sysfs is not being used, so localize
-	 * the device descriptor as if this were usbfs */
+	/* right now android_jni_device is only filled if sysfs is not being used,
+	 * so localize the device descriptor as if this were usbfs */
 	usbi_localize_device_descriptor(priv->descriptors);
 
 	memcpy(&dev->device_descriptor, priv->descriptors, LIBUSB_DT_DEVICE_SIZE);
@@ -587,7 +583,8 @@ static int get_android_jni_fd(struct libusb_device_handle *handle)
 	return fd;
 }
 
-static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busnum, uint8_t devaddr)
+static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busnum,
+	uint8_t devaddr)
 {
 	struct libusb_context *ctx = DEVICE_CTX(dev);
 	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
@@ -606,7 +603,10 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 
 	priv->android_jni_device = NULL;
 
-	while (android_jni_devices_next(devices, &iter_device, &iter_busnum, &iter_devaddr) == LIBUSB_SUCCESS) {
+	while (LIBUSB_SUCCESS ==
+		android_jni_devices_next(devices, &iter_device,
+		                         &iter_busnum, &iter_devaddr))
+	{
 		if (iter_busnum == busnum && iter_devaddr == devaddr) {
 			priv->android_jni_device = iter_device;
 			break;
@@ -620,7 +620,10 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 		return LIBUSB_ERROR_NO_DEVICE;
 	}
 
-	r = android_jni_gen_descriptors(cpriv->android_jni, priv->android_jni_device, (uint8_t**)&priv->descriptors, &priv->descriptors_len, &strings, &strings_len);
+	r = android_jni_gen_descriptors(
+		cpriv->android_jni, priv->android_jni_device,
+		(uint8_t**)&priv->descriptors, &priv->descriptors_len,
+		&strings, &strings_len);
 	if (r < 0)
 		return r;
 
