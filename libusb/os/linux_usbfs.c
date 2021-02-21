@@ -436,6 +436,8 @@ static int op_init(struct libusb_context *ctx)
 		cpriv->weak_authority = default_weak_authority;
 		return LIBUSB_SUCCESS;
 	}
+#else
+    UNUSED(cpriv);
 #endif
 
 	usbi_mutex_static_lock(&linux_hotplug_startstop_lock);
@@ -1137,6 +1139,8 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 		usbi_localize_device_descriptor(priv->descriptors);
 		fd = -1;
 		skip_fd = 1;
+#else
+        UNUSED(cpriv);
 #endif
 	} else {
 		fd = get_usbfs_fd(dev, O_RDONLY, 0);
@@ -1633,6 +1637,8 @@ static void op_close(struct libusb_device_handle *dev_handle)
 #ifdef __ANDROID__
 	if (hpriv->android_jni_connection != NULL)
 		android_jni_disconnect(cpriv->android_jni, hpriv->android_jni_connection);
+#else
+    UNUSED(cpriv);
 #endif
 }
 
@@ -2058,6 +2064,8 @@ static void op_destroy_device(struct libusb_device *dev)
 	if (priv->android_jni_device != NULL) {
 		android_jni_globalunref(cpriv->android_jni, priv->android_jni_device);
 	}
+#else
+    UNUSED(cpriv);
 #endif
 
 	free(priv->config_descriptors);
