@@ -437,7 +437,7 @@ static int op_init(struct libusb_context *ctx)
 		return LIBUSB_SUCCESS;
 	}
 #else
-    UNUSED(cpriv);
+	UNUSED(cpriv);
 #endif
 
 	usbi_mutex_static_lock(&linux_hotplug_startstop_lock);
@@ -498,6 +498,10 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 		int r = android_jnienv_javavm(jni_env, &android_default_javavm);
 		usbi_dbg("set default jnienv javavm %p %p", jni_env, android_default_javavm);
 		return r;
+	} else if (option == LIBUSB_OPTION_ANDROID_JAVAVM) {
+		android_default_javavm = va_arg(ap, JavaVM *);
+		usbi_dbg("set default javavm %p", android_default_javavm);
+		return LIBUSB_SUCCESS;
 	}
 #else
 	UNUSED(ap);
@@ -1140,7 +1144,7 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 		fd = -1;
 		skip_fd = 1;
 #else
-        UNUSED(cpriv);
+		UNUSED(cpriv);
 #endif
 	} else {
 		fd = get_usbfs_fd(dev, O_RDONLY, 0);
@@ -1638,7 +1642,7 @@ static void op_close(struct libusb_device_handle *dev_handle)
 	if (hpriv->android_jni_connection != NULL)
 		android_jni_disconnect(cpriv->android_jni, hpriv->android_jni_connection);
 #else
-    UNUSED(cpriv);
+	UNUSED(cpriv);
 #endif
 }
 
@@ -2065,7 +2069,7 @@ static void op_destroy_device(struct libusb_device *dev)
 		android_jni_globalunref(cpriv->android_jni, priv->android_jni_device);
 	}
 #else
-    UNUSED(cpriv);
+	UNUSED(cpriv);
 #endif
 
 	free(priv->config_descriptors);
