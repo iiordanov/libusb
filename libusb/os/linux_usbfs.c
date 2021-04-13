@@ -136,6 +136,7 @@ struct config_descriptor {
 struct linux_context_priv {
 #ifdef __ANDROID__
 	int weak_authority;
+	JavaVM * android_javavm;
 	struct android_jni_context *android_jni;
 #endif
 };
@@ -381,7 +382,6 @@ static int op_init(struct libusb_context *ctx)
 	struct kernel_version kversion;
 	const char *usbfs_path;
 	int r;
-	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 	if (get_kernel_version(ctx, &kversion) < 0)
 		return LIBUSB_ERROR_OTHER;
@@ -424,21 +424,6 @@ static int op_init(struct libusb_context *ctx)
 			sysfs_available = 0;
 		}
 	}
-
-#ifdef __ANDROID__
-	if (android_default_javavm != NULL) {
-		r = android_jni(android_default_javavm, &cpriv->android_jni);
-		if (r != LIBUSB_SUCCESS)
-			return r;
-		return android_jni_scan_devices(ctx);
-	}
-	if (default_weak_authority) {
-		cpriv->weak_authority = default_weak_authority;
-		return LIBUSB_SUCCESS;
-	}
-#else
-	UNUSED(cpriv);
-#endif
 
 	usbi_mutex_static_lock(&linux_hotplug_startstop_lock);
 	r = LIBUSB_SUCCESS;
@@ -524,14 +509,21 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 	jobject device;
 	uint8_t busnum, devaddr;
 
-	r = android_jni_detect_usbhost(cpriv->android_jni, &has_usbhost);
+	if (cpriv->android_jni == NULL) {
+		r = android_jni(cpriv->android_javavm, &cpriv->android_jni);
 
-	if (r != LIBUSB_SUCCESS)
-		return r;
+		if (r != LIBUSB_SUCCESS)
+			return r;
 
-	if (!has_usbhost) {
-		usbi_dbg("This device does not have the android.hardware.usb.host feature");
-		return LIBUSB_ERROR_NOT_SUPPORTED;
+		r = android_jni_detect_usbhost(cpriv->android_jni, &has_usbhost);
+
+		if (r != LIBUSB_SUCCESS)
+			return r;
+
+		if (!has_usbhost) {
+			usbi_dbg("This device does not have the android.hardware.usb.host feature");
+			return LIBUSB_ERROR_NOT_SUPPORTED;
+		}
 	}
 
 	usbi_dbg("enumerating usb devices using android api");
@@ -643,8 +635,30 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 static int linux_scan_devices(struct libusb_context *ctx)
 {
 	int ret;
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 	usbi_mutex_static_lock(&linux_hotplug_lock);
+
+#if defined(__ANDROID__)
+	if (android_default_javavm != NULL) {
+		cpriv->android_javavm = android_default_javavm;
+
+		ret = android_jni_scan_devices(ctx);
+
+		if (ret != LIBUSB_SUCCESS) {
+			if (cpriv->android_jni != NULL)
+				android_jni_free(cpriv->android_jni);
+
+			return ret;
+		}
+	}
+	if (default_weak_authority) {
+		cpriv->weak_authority = default_weak_authority;
+		return LIBUSB_SUCCESS;
+	}
+#else
+	UNUSED(cpriv);
+#endif
 
 #if defined(HAVE_LIBUDEV)
 	ret = linux_udev_scan_devices(ctx);
