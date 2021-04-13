@@ -671,6 +671,31 @@ static int linux_scan_devices(struct libusb_context *ctx)
 	return ret;
 }
 
+static int op_get_device_list(struct libusb_context *ctx,
+	struct discovered_devs **discdevs)
+{
+	struct libusb_device *dev;
+	int ret;
+
+	ret = linux_scan_devices(ctx);
+
+	if (ret != LIBUSB_SUCCESS)
+		return ret;
+
+	usbi_mutex_lock(&ctx->usb_devs_lock);
+	for_each_device(ctx, dev) {
+		*discdevs = discovered_devs_append(*discdevs, dev);
+
+		if (!*discdevs) {
+			ret = LIBUSB_ERROR_NO_MEM;
+			break;
+		}
+	}
+	usbi_mutex_unlock(&ctx->usb_devs_lock);
+
+	return ret;
+}
+
 static void op_hotplug_poll(void)
 {
 	linux_hotplug_poll();
@@ -3010,7 +3035,10 @@ const struct usbi_os_backend usbi_backend = {
 	.init = op_init,
 	.exit = op_exit,
 	.set_option = op_set_option,
+	.get_device_list = op_get_device_list,
+#ifndef __ANDROID__
 	.hotplug_poll = op_hotplug_poll,
+#endif
 	.get_active_config_descriptor = op_get_active_config_descriptor,
 	.get_config_descriptor = op_get_config_descriptor,
 	.get_config_descriptor_by_value = op_get_config_descriptor_by_value,
