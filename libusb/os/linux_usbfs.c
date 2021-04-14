@@ -425,13 +425,17 @@ static int op_init(struct libusb_context *ctx)
 		}
 	}
 
+	usbi_dbg("locking");
+
 	usbi_mutex_static_lock(&linux_hotplug_startstop_lock);
 	r = LIBUSB_SUCCESS;
 	if (init_count == 0) {
+		usbi_dbg("event monitor");
 		/* start up hotplug event handler */
 		r = linux_start_event_monitor();
 	}
 	if (r == LIBUSB_SUCCESS) {
+		usbi_dbg("scan");
 		r = linux_scan_devices(ctx);
 		if (r == LIBUSB_SUCCESS)
 			init_count++;
@@ -470,30 +474,32 @@ static void op_exit(struct libusb_context *ctx)
 
 static int op_set_option(struct libusb_context *ctx, enum libusb_option option, va_list ap)
 {
+	int ret = LIBUSB_ERROR_NOT_SUPPORTED;
 	UNUSED(ctx);
 
 #ifdef __ANDROID__
+	usbi_mutex_static_lock(&linux_hotplug_lock);
 	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
 		int parameter = va_arg(ap, int);
 		default_weak_authority = !parameter;
 		usbi_dbg("set libusb has weak authority: %d", default_weak_authority);
-		return LIBUSB_SUCCESS;
+		ret = LIBUSB_SUCCESS;
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
 		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
-		int r = android_jnienv_javavm(jni_env, &android_default_javavm);
+		ret = android_jnienv_javavm(jni_env, &android_default_javavm);
 		usbi_dbg("set default jnienv javavm %p %p", jni_env, android_default_javavm);
-		return r;
 	} else if (option == LIBUSB_OPTION_ANDROID_JAVAVM) {
 		android_default_javavm = va_arg(ap, JavaVM *);
 		usbi_dbg("set default javavm %p", android_default_javavm);
-		return LIBUSB_SUCCESS;
+		ret = LIBUSB_SUCCESS;
 	}
+	usbi_mutex_static_unlock(&linux_hotplug_lock);
 #else
 	UNUSED(ap);
 	UNUSED(option);
 #endif
 
-	return LIBUSB_ERROR_NOT_SUPPORTED;
+	return ret;
 }
 
 #ifdef __ANDROID__
@@ -502,12 +508,24 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 {
 	/* Access and use the Android API via jni_env */
 
-	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
+	struct linux_context_priv *cpriv;
 	int r, has_usbhost;
 
 	struct android_jni_devices *devices;
 	jobject device;
 	uint8_t busnum, devaddr;
+
+	usbi_mutex_static_lock(&active_contexts_lock);
+
+	usbi_dbg("android scan");
+
+	if (ctx == NULL) /* default to first context */
+		for_each_context(ctx) break;
+
+	if (ctx == NULL)
+		return LIBUSB_SUCCESS;
+
+	cpriv = usbi_get_context_priv(ctx);
 
 	if (cpriv->android_jni == NULL) {
 		r = android_jni(cpriv->android_javavm, &cpriv->android_jni);
@@ -536,14 +554,20 @@ static int android_jni_scan_devices(struct libusb_context *ctx)
 	while (LIBUSB_SUCCESS ==
 		android_jni_devices_next(devices, &device, &busnum, &devaddr))
 	{
+		usbi_dbg("device %d/%d", busnum, devaddr);
 
-		if (linux_enumerate_device(ctx, busnum, devaddr, NULL) < 0)
-			usbi_dbg("failed to enumerate android device %d/%d", busnum, devaddr);
+		for_each_context(ctx) {
+			usbi_dbg("enumerating for %p", ctx);
+			if (linux_enumerate_device(ctx, busnum, devaddr, NULL) < 0)
+				usbi_dbg("failed to enumerate android device %d/%d", busnum, devaddr);
+		}
 	
 		android_jni_globalunref(cpriv->android_jni, device);
 	}
 
 	android_jni_devices_free(devices);
+
+	usbi_mutex_static_unlock(&active_contexts_lock);
 	
 	return LIBUSB_SUCCESS;
 }
@@ -630,6 +654,11 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 	return LIBUSB_SUCCESS;
 }
 
+void linux_android_hotplug_poll()
+{
+	android_jni_scan_devices(NULL);
+}
+
 #endif
 
 static int linux_scan_devices(struct libusb_context *ctx)
@@ -637,24 +666,25 @@ static int linux_scan_devices(struct libusb_context *ctx)
 	int ret;
 	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
+	usbi_dbg("locking");
 	usbi_mutex_static_lock(&linux_hotplug_lock);
+	usbi_dbg("locked");
 
 #if defined(__ANDROID__)
-	if (android_default_javavm != NULL) {
-		cpriv->android_javavm = android_default_javavm;
+	if (android_default_javavm != NULL) { // this could be moved into android_jni_scan_devices, maybe as an inverse condition that calls the linux default.  it could then be renamed android_scan_devices.
+		usbi_dbg("android");
+		cpriv->android_javavm = android_default_javavm; // this could be moved into android_jni_scan_devices
 
 		ret = android_jni_scan_devices(ctx);
 
-		if (ret != LIBUSB_SUCCESS) {
-			if (cpriv->android_jni != NULL)
-				android_jni_free(cpriv->android_jni);
-
-			return ret;
-		}
+		if (ret != LIBUSB_SUCCESS && cpriv->android_jni != NULL) // this could be moved into a jump target in android_jni_scan_devices
+			android_jni_free(cpriv->android_jni);
+		goto out;
 	}
-	if (default_weak_authority) {
+	if (default_weak_authority) { // this could be left as-is for similarity to old
 		cpriv->weak_authority = default_weak_authority;
-		return LIBUSB_SUCCESS;
+		ret = LIBUSB_SUCCESS;
+		goto out;
 	}
 #else
 	UNUSED(cpriv);
@@ -666,32 +696,8 @@ static int linux_scan_devices(struct libusb_context *ctx)
 	ret = linux_default_scan_devices(ctx);
 #endif
 
+out:
 	usbi_mutex_static_unlock(&linux_hotplug_lock);
-
-	return ret;
-}
-
-static int op_get_device_list(struct libusb_context *ctx,
-	struct discovered_devs **discdevs)
-{
-	struct libusb_device *dev;
-	int ret;
-
-	ret = linux_scan_devices(ctx);
-
-	if (ret != LIBUSB_SUCCESS)
-		return ret;
-
-	usbi_mutex_lock(&ctx->usb_devs_lock);
-	for_each_device(ctx, dev) {
-		*discdevs = discovered_devs_append(*discdevs, dev);
-
-		if (!*discdevs) {
-			ret = LIBUSB_ERROR_NO_MEM;
-			break;
-		}
-	}
-	usbi_mutex_unlock(&ctx->usb_devs_lock);
 
 	return ret;
 }
@@ -3035,10 +3041,7 @@ const struct usbi_os_backend usbi_backend = {
 	.init = op_init,
 	.exit = op_exit,
 	.set_option = op_set_option,
-	.get_device_list = op_get_device_list,
-#ifndef __ANDROID__
 	.hotplug_poll = op_hotplug_poll,
-#endif
 	.get_active_config_descriptor = op_get_active_config_descriptor,
 	.get_config_descriptor = op_get_config_descriptor,
 	.get_config_descriptor_by_value = op_get_config_descriptor_by_value,

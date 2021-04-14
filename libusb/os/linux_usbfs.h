@@ -165,6 +165,9 @@ int linux_udev_stop_event_monitor(void);
 int linux_udev_scan_devices(struct libusb_context *ctx);
 void linux_udev_hotplug_poll(void);
 #else
+#if defined(__ANDROID__)
+void linux_android_hotplug_poll(void);
+#endif /* __ANDROID__ */
 int linux_netlink_start_event_monitor(void);
 int linux_netlink_stop_event_monitor(void);
 void linux_netlink_hotplug_poll(void);
@@ -194,7 +197,9 @@ static inline void linux_hotplug_poll(void)
 {
 #if defined(HAVE_LIBUDEV)
 	linux_udev_hotplug_poll();
-#elif !defined(__ANDROID__)
+#elif defined(__ANDROID__)
+    linux_android_hotplug_poll();
+#else
 	linux_netlink_hotplug_poll();
 #endif
 }
