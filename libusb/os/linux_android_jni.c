@@ -799,6 +799,9 @@ static int android_jni_gen_string(JNIEnv *jni_env,
 	const uint16_t *str_ptr;
 	struct usbi_string_descriptor *desc;
 
+	if (!*strings)
+		return LIBUSB_ERROR_NO_MEM;
+
 	if ((*jni_env)->IsSameObject(jni_env, str, NULL))
 		return 0;
 
