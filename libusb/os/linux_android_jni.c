@@ -205,9 +205,10 @@ int android_jni_free(struct android_jni_context *jni)
 	JNIEnv *jni_env;
 
 	r = android_jni_env(jni, &jni_env);
-	if (r != LIBUSB_SUCCESS)
+	if (r != LIBUSB_SUCCESS) {
 		free(jni);
 		return r;
+	}
 
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->Intent);
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->PendingIntent);
@@ -221,6 +222,7 @@ int android_jni_free(struct android_jni_context *jni)
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->permission_action);
 
 	free(jni);
+	return LIBUSB_SUCCESS;
 }
 
 int android_jni_detect_usbhost(struct android_jni_context *jni, int *has_usbhost)
