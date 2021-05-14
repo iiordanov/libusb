@@ -2129,6 +2129,12 @@ enum libusb_option {
 	 * USB device in question, and whether or not the user granted
 	 * permission. The call to open the device returns LIBUSB_ERROR_ACCESS.
 	 *
+	 * Before a connection is made and the user provides permission for a
+	 * device, libusb generates fake descriptors for it from Android's API.
+	 * If these descriptors are used before connection, the correct ones
+	 * must be rerequested with an appropriate libs API function, after
+	 * connection.
+	 * 
 	 * Only valid on Android.
  	 */
 	LIBUSB_OPTION_ANDROID_JNIENV = 3,
