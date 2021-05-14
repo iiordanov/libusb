@@ -788,6 +788,10 @@ static int android_jni_gen_epoint(struct android_jni_context *jni,
 	return LIBUSB_SUCCESS;
 }
 
+/* These strings are not actually used yet.  This function
+   is only here to make it possibly easier for an interested
+   party to implement access to strings before connection,
+   https://github.com/libusb/libusb/pull/875 */   
 static int android_jni_gen_string(JNIEnv *jni_env,
 	char **strings, size_t *strings_len, jstring str)
 {
