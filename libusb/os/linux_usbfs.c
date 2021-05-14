@@ -621,6 +621,8 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 		}
 	}
 
+	android_jni_devices_free(devices);
+
 	if (priv->android_jni_device == NULL)
 	{
 		return LIBUSB_ERROR_NO_DEVICE;
