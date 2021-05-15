@@ -601,6 +601,7 @@ int android_jni_disconnect(struct android_jni_context *jni, jobject connection)
 	(*jni_env)->CallVoidMethod(jni_env,
 		connection, jni->UsbDeviceConnection_close);
 
+	(*jni_env)->DeleteGlobalRef(jni_env, connection);
 	return LIBUSB_SUCCESS;
 }
 
