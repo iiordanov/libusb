@@ -86,13 +86,13 @@ endif()
 
 if(UNIX)
     target_sources(usb-1.0 PRIVATE 
-	${libusb_ROOT}/os/events_posix.c
-	${libusb_ROOT}/os/threads_posix.c
-	${libusb_ROOT}/os/linux_usbfs.c
+        ${libusb_ROOT}/os/events_posix.c
+        ${libusb_ROOT}/os/threads_posix.c
+        ${libusb_ROOT}/os/linux_usbfs.c
         ${libusb_ROOT}/os/linux_udev.c
     )
     target_link_libraries(usb-1.0 PUBLIC udev)
-    target_compile_definitions(usb-1.0 PRIVATE HAVE_LIBUDEV)
+    target_compile_definitions(usb-1.0 PRIVATE HAVE_LIBUDEV=1)
 endif()
 
 if(ANDROID)
