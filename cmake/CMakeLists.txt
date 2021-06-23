@@ -7,6 +7,7 @@ include(CheckIncludeFiles)
 include(CheckFunctionExists)
 include(CheckSymbolExists)
 include(CheckStructHasMember)
+include(CheckCXXCompilerFlag)
 include(CTest)
 
 check_function_exists(clock_gettime             HAVE_CLOCK_GETTIME)
@@ -85,18 +86,15 @@ endif()
 
 if(UNIX)
     target_sources(usb-1.0 PRIVATE 
-        ${libusb_ROOT}/os/events_posix.c
-        ${libusb_ROOT}/os/threads_posix.c
-        ${libusb_ROOT}/os/linux_usbfs.c
-    )
-endif()
-
-if(LINUX)
-    target_sources(usb-1.0 PRIVATE 
+	${libusb_ROOT}/os/events_posix.c
+	${libusb_ROOT}/os/threads_posix.c
+	${libusb_ROOT}/os/linux_usbfs.c
         ${libusb_ROOT}/os/linux_udev.c
     )
     target_link_libraries(usb-1.0 PUBLIC udev)
+    target_compile_definitions(usb-1.0 PRIVATE HAVE_LIBUDEV)
 endif()
+
 if(ANDROID)
     target_sources(usb-1.0 PRIVATE 
         ${libusb_ROOT}/os/linux_netlink.c
