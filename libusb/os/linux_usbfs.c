@@ -95,9 +95,6 @@ static int sysfs_available = -1;
 /* how many times have we initted (and not exited) ? */
 static int init_count = 0;
 
-/* have no authority to operate usb device directly */
-static int weak_authority = 0;
-
 /* Serialize scan-devices, event-thread, and poll */
 usbi_mutex_static_t linux_hotplug_lock = USBI_MUTEX_INITIALIZER;
 
@@ -403,10 +400,9 @@ static int op_init(struct libusb_context *ctx)
 		}
 	}
 
-	if (weak_authority) {
-		cpriv->weak_authority = weak_authority;
+	cpriv->weak_authority = default_context_options[LIBUSB_OPTION_WEAK_AUTHORITY].is_set;
+	if (cpriv->weak_authority)
 		return LIBUSB_SUCCESS;
-	}
 
 	r = LIBUSB_SUCCESS;
 	if (init_count == 0) {
@@ -445,13 +441,8 @@ static void op_exit(struct libusb_context *ctx)
 static int op_set_option(struct libusb_context *ctx, enum libusb_option option, va_list ap)
 {
 	UNUSED(ctx);
+	UNUSED(option);
 	UNUSED(ap);
-
-	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
-		usbi_dbg("set libusb has weak authority");
-		weak_authority = 1;
-		return LIBUSB_SUCCESS;
-	}
 
 	return LIBUSB_ERROR_NOT_SUPPORTED;
 }
