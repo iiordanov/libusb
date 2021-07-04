@@ -70,11 +70,12 @@ jint GetEnvProxy(JavaVM* vm, void**envptr, jint arg)
     log("DetachCurrentThreadProxy: %i", ret);
     return ret;
 }
-JNIInvokeInterface vm_proxy = {
+JNIInvokeInterface _vm_proxy = {
 	.AttachCurrentThread = AttachCurrentThreadProxy,
 	.DetachCurrentThread = DetachCurrentThreadProxy,
 	.GetEnv = GetEnvProxy,
 };
+JavaVM *vm_proxy = (JavaVM*)&_vm_proxy;
 
 void android_main(struct android_app * state) {
     libusb_context * ctx;
