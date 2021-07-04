@@ -1223,6 +1223,47 @@ static int init_device(struct libusb_device *dev, struct libusb_device *parent_d
 	return LIBUSB_SUCCESS;
 }
 
+static bool get_dev_port_number(HDEVINFO dev_info, SP_DEVINFO_DATA *dev_info_data, DWORD *port_nr)
+{
+	char buffer[MAX_KEY_LENGTH];
+	DWORD size;
+
+	// First try SPDRP_LOCATION_INFORMATION, which returns a REG_SZ. The string *may* have a format
+	// similar to "Port_#0002.Hub_#000D", in which case we can extract the port number. However, we
+	// cannot extract the port if the returned string does not follow this format.
+	if (pSetupDiGetDeviceRegistryPropertyA(dev_info, dev_info_data, SPDRP_LOCATION_INFORMATION,
+			NULL, (PBYTE)buffer, sizeof(buffer), NULL)) {
+		// Check for the required format.
+		if (strncmp(buffer, "Port_#", 6) == 0) {
+			*port_nr = atoi(buffer + 6);
+			return true;
+		}
+	}
+
+	// Next try SPDRP_LOCATION_PATHS, which returns a REG_MULTI_SZ (but we only examine the first
+	// string in it). Each path has a format similar to,
+	// "PCIROOT(B2)#PCI(0300)#PCI(0000)#USBROOT(0)#USB(1)#USB(2)#USBMI(3)", and the port number is
+	// the number within the last "USB(x)" token.
+	if (pSetupDiGetDeviceRegistryPropertyA(dev_info, dev_info_data, SPDRP_LOCATION_PATHS,
+			NULL, (PBYTE)buffer, sizeof(buffer), NULL)) {
+		// Find the last "#USB(x)" substring
+		for (char *token = strrchr(buffer, '#'); token != NULL; token = strrchr(buffer, '#')) {
+			if (strncmp(token, "#USB(", 5) == 0) {
+				*port_nr = atoi(token + 5);
+				return true;
+			}
+			// Shorten the string and try again.
+			*token = '\0';
+		}
+	}
+
+	// Lastly, try SPDRP_ADDRESS, which returns a REG_DWORD. The address *may* be the port number,
+	// which is true for the Microsoft driver but may not be true for other drivers. However, we
+	// have no other options here but to accept what it returns.
+	return pSetupDiGetDeviceRegistryPropertyA(dev_info, dev_info_data, SPDRP_ADDRESS,
+			NULL, (PBYTE)port_nr, sizeof(*port_nr), &size) && (size == sizeof(*port_nr));
+}
+
 static int enumerate_hcd_root_hub(struct libusb_context *ctx, const char *dev_id,
 	uint8_t bus_number, DEVINST devinst)
 {
@@ -1680,6 +1721,7 @@ static int winusb_get_device_list(struct libusb_context *ctx, struct discovered_
 
 					priv = winusb_device_priv_init(dev);
 					priv->dev_id = _strdup(dev_id);
+					priv->class_guid = dev_info_data.ClassGuid;
 					if (priv->dev_id == NULL) {
 						libusb_unref_device(dev);
 						LOOP_BREAK(LIBUSB_ERROR_NO_MEM);
@@ -1690,6 +1732,12 @@ static int winusb_get_device_list(struct libusb_context *ctx, struct discovered_
 					priv = usbi_get_device_priv(dev);
 					if (strcmp(priv->dev_id, dev_id) != 0) {
 						usbi_dbg("device instance ID for session [%lX] changed", session_id);
+						usbi_disconnect_device(dev);
+						libusb_unref_device(dev);
+						goto alloc_device;
+					}
+					if (!IsEqualGUID(&priv->class_guid, &dev_info_data.ClassGuid)) {
+						usbi_dbg("device class GUID for session [%lX] changed", session_id);
 						usbi_disconnect_device(dev);
 						libusb_unref_device(dev);
 						goto alloc_device;
@@ -1747,10 +1795,8 @@ static int winusb_get_device_list(struct libusb_context *ctx, struct discovered_
 				r = enumerate_hcd_root_hub(ctx, dev_id, (uint8_t)(i + 1), dev_info_data.DevInst);
 				break;
 			case GEN_PASS:
-				// The SPDRP_ADDRESS for USB devices is the device port number on the hub
 				port_nr = 0;
-				if (!pSetupDiGetDeviceRegistryPropertyA(*dev_info, &dev_info_data, SPDRP_ADDRESS,
-						NULL, (PBYTE)&port_nr, sizeof(port_nr), &size) || (size != sizeof(port_nr)))
+				if (!get_dev_port_number(*dev_info, &dev_info_data, &port_nr))
 					usbi_warn(ctx, "could not retrieve port number for device '%s': %s", dev_id, windows_error_str(0));
 				r = init_device(dev, parent_dev, (uint8_t)port_nr, dev_info_data.DevInst);
 				if (r == LIBUSB_SUCCESS) {
@@ -2024,8 +2070,6 @@ static int winusb_submit_transfer(struct usbi_transfer *itransfer)
 		break;
 	case LIBUSB_TRANSFER_TYPE_BULK:
 	case LIBUSB_TRANSFER_TYPE_INTERRUPT:
-		if (IS_XFEROUT(transfer) && (transfer->flags & LIBUSB_TRANSFER_ADD_ZERO_PACKET))
-			return LIBUSB_ERROR_NOT_SUPPORTED;
 		transfer_fn = priv->apib->submit_bulk_transfer;
 		break;
 	case LIBUSB_TRANSFER_TYPE_ISOCHRONOUS:
@@ -2474,6 +2518,7 @@ static int winusbx_configure_endpoints(int sub_api, struct libusb_device_handle 
 			continue; // Other policies don't apply to control endpoint or libusb0
 
 		policy = false;
+		handle_priv->interface_handle[iface].zlp[endpoint_address] = WINUSB_ZLP_UNSET;
 		if (!WinUSBX[sub_api].SetPipePolicy(winusb_handle, endpoint_address,
 			SHORT_PACKET_TERMINATE, sizeof(UCHAR), &policy))
 			usbi_dbg("failed to disable SHORT_PACKET_TERMINATE for endpoint %02X", endpoint_address);
@@ -3041,6 +3086,23 @@ static int winusbx_submit_bulk_transfer(int sub_api, struct usbi_transfer *itran
 		usbi_dbg("reading %d bytes", transfer->length);
 		ret = WinUSBX[sub_api].ReadPipe(winusb_handle, transfer->endpoint, transfer->buffer, transfer->length, NULL, overlapped);
 	} else {
+		// Set SHORT_PACKET_TERMINATE if ZLP requested.
+		// Changing this can be a problem with packets in flight, so only allow on the first transfer.
+		UCHAR policy = (transfer->flags & LIBUSB_TRANSFER_ADD_ZERO_PACKET) != 0;
+		uint8_t* current_zlp = &handle_priv->interface_handle[current_interface].zlp[transfer->endpoint];
+		if (*current_zlp == WINUSB_ZLP_UNSET) {
+			if (policy &&
+				!WinUSBX[sub_api].SetPipePolicy(winusb_handle, transfer->endpoint,
+				SHORT_PACKET_TERMINATE, sizeof(UCHAR), &policy)) {
+				usbi_err(TRANSFER_CTX(transfer), "failed to set SHORT_PACKET_TERMINATE for endpoint %02X", transfer->endpoint);
+				return LIBUSB_ERROR_NOT_SUPPORTED;
+			}
+			*current_zlp = policy ? WINUSB_ZLP_ON : WINUSB_ZLP_OFF;
+		} else if (policy != (*current_zlp == WINUSB_ZLP_ON)) {
+			usbi_err(TRANSFER_CTX(transfer), "cannot change ZERO_PACKET for endpoint %02X on Windows", transfer->endpoint);
+			return LIBUSB_ERROR_NOT_SUPPORTED;
+		}
+
 		usbi_dbg("writing %d bytes", transfer->length);
 		ret = WinUSBX[sub_api].WritePipe(winusb_handle, transfer->endpoint, transfer->buffer, transfer->length, NULL, overlapped);
 	}
@@ -4005,6 +4067,9 @@ static int hid_submit_bulk_transfer(int sub_api, struct usbi_transfer *itransfer
 
 	UNUSED(sub_api);
 	CHECK_HID_AVAILABLE;
+
+	if (IS_XFEROUT(transfer) && (transfer->flags & LIBUSB_TRANSFER_ADD_ZERO_PACKET))
+		return LIBUSB_ERROR_NOT_SUPPORTED;
 
 	transfer_priv->hid_dest = NULL;
 	safe_free(transfer_priv->hid_buffer);

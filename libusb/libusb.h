@@ -904,7 +904,7 @@ struct libusb_container_id_descriptor {
 
 /** \ingroup libusb_asyncio
  * Setup packet for control transfers. */
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__WATCOMC__)
 #pragma pack(push, 1)
 #endif
 struct libusb_control_setup {
@@ -932,7 +932,7 @@ struct libusb_control_setup {
 	/** Number of bytes to transfer */
 	uint16_t wLength;
 } LIBUSB_PACKED;
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__WATCOMC__)
 #pragma pack(pop)
 #endif
 
@@ -1325,6 +1325,9 @@ enum libusb_log_level {
 
 /** \ingroup libusb_lib
  *  Log callback mode.
+ *
+ *  Since version 1.0.23, \ref LIBUSB_API_VERSION >= 0x01000107
+ *
  * \see libusb_set_log_cb()
  */
 enum libusb_log_cb_mode {
@@ -1341,6 +1344,9 @@ enum libusb_log_cb_mode {
  * is a global log message
  * \param level the log level, see \ref libusb_log_level for a description
  * \param str the log message
+ *
+ * Since version 1.0.23, \ref LIBUSB_API_VERSION >= 0x01000107
+ *
  * \see libusb_set_log_cb()
  */
 typedef void (LIBUSB_CALL *libusb_log_cb)(libusb_context *ctx,
@@ -2092,17 +2098,18 @@ enum libusb_option {
 	 */
 	LIBUSB_OPTION_USE_USBDK = 1,
 
-	/** Set libusb has weak authority. With this option, libusb will skip
-	 * scan devices in libusb_init.
+	/** Flag that libusb has weak authority.
 	 *
-	 * This option should be set _before_ calling libusb_init(), and
-	 * influences new calls to libusb_init() after the option is set.
-	 * Normally libusb_wrap_sys_device needs this option set.  The context
+	 * With this option set, libusb will skip scanning devices in
+	 * libusb_init().
+	 *
+	 * This option should be set before calling libusb_init(), otherwise
+	 * libusb_init() might fail. It influences new calls to libusb_init()
+	 * after the option is set. The option is typically needed on Android
+	 * and used together with libusb_wrap_sys_device(). The context
 	 * pointer is unused.
 	 *
-	 * To disable this option after enabling it, pass a nonzero parameter.
-	 *
-	 * Only valid on Android for now.
+	 * Only valid on Linux.
 	 */
 	LIBUSB_OPTION_WEAK_AUTHORITY = 2,
 
@@ -2111,12 +2118,12 @@ enum libusb_option {
 	 * functions that would otherwise require additional Java code to
 	 * ask for permission.  The pointer must be correct for the current
 	 * thread.
- 	 *
+	 *
 	 * This option should be set _before_ calling libusb_init(), and
 	 * specifies the java virtual machine only for new calls to
 	 * libusb_init() after the option is set.  The context pointer is
 	 * unused.
- 	 *
+	 *
 	 * When this option is set, the provided pointer is used for device
 	 * enumeration and connection for the entire lifetime of the libusb
 	 * context.  After connection, the normal linux backend is used via
@@ -2134,9 +2141,9 @@ enum libusb_option {
 	 * If these descriptors are used before connection, the correct ones
 	 * must be rerequested with an appropriate libusb API function, after
 	 * connection.
-	 * 
+	 *
 	 * Only valid on Android.
- 	 */
+	 */
 	LIBUSB_OPTION_ANDROID_JNIENV = 3,
 
 	/** Like LIBUSB_OPTION_ANDROID_JNIENV, except a thread-agnostic JavaVM*
@@ -2144,7 +2151,9 @@ enum libusb_option {
 	 *
 	 * Setting either option is equivalent.
 	 */
-	LIBUSB_OPTION_ANDROID_JAVAVM = 4
+	LIBUSB_OPTION_ANDROID_JAVAVM = 4,
+
+	LIBUSB_OPTION_MAX = 5
 };
 
 int LIBUSB_CALL libusb_set_option(libusb_context *ctx, enum libusb_option option, ...);
