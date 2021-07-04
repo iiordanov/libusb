@@ -48,13 +48,33 @@ void * sidethread_run(void * vctx) {
     return (void*)r;
 }
 
-jint (*_DetachCurrentThread)(JavaVM*);
-jint DetachCurrentThreadProxy(JavaVM* vm)
+// outputs logs to show libusb's new thread is detached when closed
+JavaVM * _vm;
+jint AttachCurrentThreadProxy(JavaVM* vm, JNIEnv** envptr, void* args)
 {
-    jint ret = _DetachCurrentThread(vm);
-    log("DetachCurrentThread: %i", ret);
+    jint ret = (*_vm)->AttachCurrentThread(_vm, envptr, args);
+    log("AttachCurrentThreadProxy: %i", ret);
     return ret;
 }
+
+jint DetachCurrentThreadProxy(JavaVM* vm)
+{
+    jint ret = (*_vm)->DetachCurrentThread(_vm);
+    log("DetachCurrentThreadProxy: %i", ret);
+    return ret;
+}
+
+jint GetEnvProxy(JavaVM* vm, void**envptr, jint arg)
+{
+    jint ret = (*_vm)->GetEnv(_vm, envptr, arg);
+    log("DetachCurrentThreadProxy: %i", ret);
+    return ret;
+}
+JNIInvokInterface vm_proxy = {
+	.AttachCurrentThread = AttachCurrentThreadProxy,
+	.DetachCurrentThread = DetachCurrentThreadProxy,
+	.GetEnv = GetEnvProxy,
+};
 
 void android_main(struct android_app * state) {
     libusb_context * ctx;
@@ -62,14 +82,8 @@ void android_main(struct android_app * state) {
     void *sidethread_ret;
     int r;
 
-    // outputs logs to show libusb's new thread is detached when closed
-    _DetachCurrentThread = state->activity->vm->functions->DetachCurrentThread;
-    JNIInvokeInterface proxied_vm = *state->activity->vm->functions;
-    proxied_vm.DetachCurrentThread = DetachCurrentThreadProxy;
-    //((JNIInvokeInterface*)state->activity->vm)->DetachCurrentThread = DetachCurrentThreadProxy;
-
     // libusb
-    r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JAVAVM, &proxied_vm/*state->activity->vm*/, 0);
+    r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JAVAVM, &vm_proxy/*state->activity->vm*/, 0);
     log("libusb_set_option ANDROID_JAVAVM: %s", libusb_strerror(r));
 
     r = libusb_init(&ctx);
