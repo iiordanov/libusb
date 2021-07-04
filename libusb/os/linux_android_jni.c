@@ -30,19 +30,15 @@
 static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env);
 static int android_jni_fill_ctx_ids(struct android_jni_context *jni,
                                     JNIEnv *jni_env);
-static int android_jni_gen_string(JNIEnv *jni_env, char **strings,
-                                  size_t *strings_len, jstring str);
 static int android_jni_gen_epoint(struct android_jni_context *jni,
                                   JNIEnv *jni_env, jobject endpoint,
                                   uint8_t **descriptors, size_t *descriptors_len);
 static int android_jni_gen_iface(struct android_jni_context *jni, JNIEnv *jni_env,
                                  jobject interface, uint8_t *num_ifaces,
-                                 uint8_t **descriptors, size_t *descriptors_len,
-                                 char **strings, size_t *strings_len);
+                                 uint8_t **descriptors, size_t *descriptors_len);
 static int android_jni_gen_config(struct android_jni_context *jni,
                                   JNIEnv *jni_env, jobject config,
-                                  uint8_t **descriptors, size_t *descriptors_len,
-                                  char **strings, size_t *strings_len);
+                                  uint8_t **descriptors, size_t *descriptors_len);
 
 struct android_jni_context
 {
@@ -352,15 +348,13 @@ void android_jni_devices_free(struct android_jni_devices *devices)
 }
 
 int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
-	uint8_t **descriptors, size_t *descriptors_len,
-	char **strings, size_t *strings_len)
+	uint8_t **descriptors, size_t *descriptors_len)
 {
 	int r, num_configs, idx, version, tens, ones, tenths, hundredths;
 	JNIEnv *jni_env;
 	jobject config;
 	jstring jversion;
 	const char *sversion;
-	struct usbi_string_descriptor string_desc;
 	struct usbi_device_descriptor desc;
 
 	r = android_jni_env(jni, &jni_env);
@@ -371,22 +365,11 @@ int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
 	num_configs =
 		(*jni_env)->CallIntMethod(jni_env,
 			device, jni->UsbDevice_getConfigurationCount);
-
-	*strings_len = 2;
-	*strings = malloc(*strings_len);
-	if (!*strings)
-		return LIBUSB_ERROR_NO_MEM;
 	
 	*descriptors_len = LIBUSB_DT_DEVICE_SIZE;
 	*descriptors = malloc(*descriptors_len);
 	if (!*descriptors)
 		return LIBUSB_ERROR_NO_MEM;
-
-	string_desc = (struct usbi_string_descriptor){
-		.bLength = *strings_len,
-		.bDescriptorType = LIBUSB_DT_STRING,
-	};
-	*(struct usbi_string_descriptor *)*strings = string_desc;
 
 	/* parse binary coded decimal version */
 	/* String jversion = device.getVersion(); */
@@ -434,26 +417,11 @@ int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
 			(*jni_env)->CallIntMethod(jni_env,
 				device, jni->UsbDevice_getProductId)),
 		.bcdDevice = 0xFFFF,
-		.iManufacturer = android_jni_gen_string(jni_env,
-			strings, strings_len,
-			(*jni_env)->CallObjectMethod(jni_env,
-				device, jni->UsbDevice_getManufacturerName)),
-		.iProduct = android_jni_gen_string(jni_env,
-			strings, strings_len,
-			(*jni_env)->CallObjectMethod(jni_env,
-				device, jni->UsbDevice_getProductName)),
-		.iSerialNumber = android_jni_gen_string(jni_env,
-			strings, strings_len,
-			(*jni_env)->CallObjectMethod(jni_env,
-				device, jni->UsbDevice_getSerialNumber)),
+		.iManufacturer = 0,
+		.iProduct = 0,
+		.iSerialNumber = 0,
 		.bNumConfigurations = num_configs,
 	};
-	if (desc.iManufacturer < 0)
-		return desc.iManufacturer;
-	if (desc.iProduct < 0)
-		return desc.iProduct;
-	if (desc.iSerialNumber < 0)
-		return desc.iSerialNumber;
 	*(struct usbi_device_descriptor *)*descriptors = desc;
 
 	for (idx = 0; idx < num_configs; idx ++) {
@@ -464,8 +432,7 @@ int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
 
 		r =
 			android_jni_gen_config(jni, jni_env, config,
-				descriptors, descriptors_len,
-				strings, strings_len);
+				descriptors, descriptors_len);
 
 		(*jni_env)->DeleteLocalRef(jni_env, config);
 
@@ -629,8 +596,7 @@ void android_jni_globalunref(struct android_jni_context *jni, jobject object)
 
 static int android_jni_gen_config(struct android_jni_context *jni,
 	JNIEnv *jni_env, jobject config,
-	uint8_t **descriptors, size_t *descriptors_len,
-	char **strings, size_t *strings_len)
+	uint8_t **descriptors, size_t *descriptors_len)
 {
 	int r;
 	size_t num_ifaces, offset, idx;
@@ -655,10 +621,7 @@ static int android_jni_gen_config(struct android_jni_context *jni,
 		.bConfigurationValue =
 			(*jni_env)->CallIntMethod(jni_env,
 				config, jni->UsbConfiguration_getId),
-		.iConfiguration = android_jni_gen_string(jni_env,
-			strings, strings_len,
-			(*jni_env)->CallObjectMethod(jni_env,
-				config, jni->UsbConfiguration_getName)),
+		.iConfiguration = 0,
 		.bmAttributes = 0x80 |
 			((*jni_env)->CallBooleanMethod(jni_env,
 				config, jni->UsbConfiguration_isSelfPowered)
@@ -680,8 +643,7 @@ static int android_jni_gen_config(struct android_jni_context *jni,
 
 		r = android_jni_gen_iface(jni,
 			jni_env, interface, &desc.bNumInterfaces,
-			descriptors, descriptors_len,
-			strings, strings_len);
+			descriptors, descriptors_len);
 
 		(*jni_env)->DeleteLocalRef(jni_env, interface);
 
@@ -697,8 +659,7 @@ static int android_jni_gen_config(struct android_jni_context *jni,
 
 int android_jni_gen_iface(struct android_jni_context *jni,
 	JNIEnv *jni_env, jobject interface, uint8_t *num_ifaces,
-	uint8_t **descriptors, size_t *descriptors_len,
-	char **strings, size_t *strings_len)
+	uint8_t **descriptors, size_t *descriptors_len)
 {
 	int r;
 	size_t num_epoints, offset, idx;
@@ -734,13 +695,8 @@ int android_jni_gen_iface(struct android_jni_context *jni,
 		.bInterfaceProtocol =
 			(*jni_env)->CallIntMethod(jni_env,
 				interface, jni->UsbInterface_getInterfaceProtocol),
-		.iInterface = android_jni_gen_string(jni_env,
-			strings, strings_len,
-			(*jni_env)->CallObjectMethod(jni_env,
-				interface, jni->UsbInterface_getName))
+		.iInterface = 0
 	};
-	if (desc.iInterface < 0)
-		return desc.iInterface;
 	*(struct usbi_interface_descriptor *)(*descriptors + offset) = desc;
 
 	if (desc.bInterfaceNumber >= *num_ifaces)
@@ -797,76 +753,6 @@ static int android_jni_gen_epoint(struct android_jni_context *jni,
 	*(struct usbi_endpoint_descriptor *)(*descriptors + offset) = desc;
 	
 	return LIBUSB_SUCCESS;
-}
-
-/* These strings are not actually used yet: the real
-   descriptors are downloaded from the device when it is
-   opened.  This function is only here to make it possibly
-   easier for an interested party to implement access to
-   strings before connection.
-
-   https://github.com/libusb/libusb/pull/875
-
-   Note that one android device was reported to require
-   user permission before returning a serial number.  The
-   code below fills the id with '0' if this permission is
-   not available yet.  If these strings are used, it would
-   be good to publicly document that possible limit on
-   serial number access. */
-static int android_jni_gen_string(JNIEnv *jni_env,
-	char **strings, size_t *strings_len, jstring str)
-{
-	size_t str_len, offset;
-	size_t idx = 0;
-	const uint16_t *str_ptr;
-	struct usbi_string_descriptor *desc;
-
-	if ((*jni_env)->ExceptionCheck(jni_env)) {
-		(*jni_env)->ExceptionClear(jni_env);
-		goto end;
-	}
-
-	if ((*jni_env)->IsSameObject(jni_env, str, NULL))
-		goto end;
-
-	if (!*strings)
-		goto delinput;
-
-	str_ptr = (*jni_env)->GetStringChars(jni_env, str, NULL);
-	str_len = (*jni_env)->GetStringLength(jni_env, str) * sizeof(str_ptr[0]);
-
-	for (offset = 0, idx = 0;
-		offset < *strings_len;
-		offset += desc->bLength, ++ idx)
-	{
-		desc = (struct usbi_string_descriptor *)(*strings + offset);
-		if (desc->bLength - 2 == str_len) {
-			if (memcmp(desc->wData, str_ptr, str_len) == 0)
-				break;
-		}
-	}
-
-	if (offset == *strings_len) {
-		*strings_len += 2 + str_len;
-		*strings = usbi_reallocf(*strings, *strings_len);
-		if (*strings) {
-			desc = (struct usbi_string_descriptor *)(*strings + offset);
-			*desc = (struct usbi_string_descriptor){
-				.bLength = 2 + str_len,
-				.bDescriptorType = LIBUSB_DT_STRING,
-			};
-			memcpy(desc->wData, str_ptr, str_len);
-		} else {
-			idx = 0;
-		}
-	}
-
-
-	(*jni_env)->ReleaseStringChars(jni_env, str, str_ptr);
-delinput:
-	(*jni_env)->DeleteLocalRef(jni_env, str);
-end:
-	return idx;
 }
 
 static int android_jni_fill_ctx_ids(struct android_jni_context *jni,

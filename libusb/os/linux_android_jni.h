@@ -72,11 +72,10 @@ void android_jni_devices_free(struct android_jni_devices *devices);
  * itself is generated from the real descriptors but does not quite include
  * everything.
  *
- * The descriptors and strings buffers should be freed with free().
+ * The descriptors buffers should be freed with free().
  */
 int android_jni_gen_descriptors(struct android_jni_context *jni, jobject device,
-                                uint8_t **descriptors, size_t *descriptors_len,
-                                char **strings, size_t *strings_len);
+                                uint8_t **descriptors, size_t *descriptors_len);
 
 /* Detects whether or not the application has permission to connect to a device. */
 int android_jni_detect_permission(struct android_jni_context *jni, jobject device,

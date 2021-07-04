@@ -588,9 +588,6 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
 
-	char *strings;
-	size_t strings_len;
-
 	struct android_jni_devices *devices;
 	jobject iter_device;
 	uint8_t iter_busnum, iter_devaddr;
@@ -622,15 +619,9 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 
 	r = android_jni_gen_descriptors(
 		cpriv->android_jni, priv->android_jni_device,
-		(uint8_t**)&priv->descriptors, &priv->descriptors_len,
-		&strings, &strings_len);
+		(uint8_t**)&priv->descriptors, &priv->descriptors_len);
 	if (r < 0)
 		return r;
-
-	if (strings == 0)
-		return LIBUSB_ERROR_NO_MEM;
-
-	free(strings);
 
 	return LIBUSB_SUCCESS;
 }
