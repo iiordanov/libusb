@@ -2117,7 +2117,7 @@ enum libusb_option {
 	 * pointer is nonzero, the Android SDK will be used for backend
 	 * functions that would otherwise require additional Java code to
 	 * ask for permission.  The pointer must be correct for the current
-	 * thread.
+	 * thread and process.
 	 *
 	 * This option should be set _before_ calling libusb_init(), and
 	 * specifies the java virtual machine only for new calls to
@@ -2142,12 +2142,17 @@ enum libusb_option {
 	 * must be rerequested with an appropriate libusb API function, after
 	 * connection.
 	 *
+	 * A crash may happen if fork() is performed in a way Android doesn't
+	 * track, because the Application Context will no longer be valid.
+	 *
 	 * Only valid on Android.
 	 */
 	LIBUSB_OPTION_ANDROID_JNIENV = 3,
 
 	/** Like LIBUSB_OPTION_ANDROID_JNIENV, except a thread-agnostic JavaVM*
-	 * pointer is passed instead of a thread-specific JNIEnv* pointer.
+	 * pointer is passed instead of a thread-specific JNIEnv* pointer.  If
+	 * you can pass a JavaVM* instead of a JNIEnv* pointer, the it does not
+	 * matter what thread it is passed from.
 	 *
 	 * Setting either option is equivalent.
 	 */
