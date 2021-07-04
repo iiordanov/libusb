@@ -1094,12 +1094,16 @@ static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env)
 			.name = NULL,
 			.group = NULL
 		};
+		usbi_dbg("ATTACHING TO THREAD");
 		status = (*javavm)->AttachCurrentThread(javavm, jni_env, &thr_args);
 		if (status == JNI_OK) {
+			usbi_dbg("SETTING THREAD DESTRUCTOR KEY VALUE");
 			status = pthread_setspecific(jni->detach_pthread_key, javavm);
 			if (status == ENOMEM)
 				return LIBUSB_ERROR_NO_MEM;
 		}
+	} else {
+		usbi_dbg("THREAD ALREADY ATTACHED");
 	}
 	return status == 0 ? LIBUSB_SUCCESS : LIBUSB_ERROR_OTHER;
 }
