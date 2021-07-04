@@ -99,13 +99,7 @@ static int sysfs_available = -1;
 /* how many times have we initted (and not exited) ? */
 static int init_count = 0;
 
-/* have no authority to operate usb device directly */
-static int weak_authority = 0;
-
 #ifdef __ANDROID__
-/* user-provided JavaVM to use */
-JavaVM *android_default_javavm = NULL;
-
 static int android_jni_scan_devices(struct libusb_context *ctx);
 #endif
 
@@ -132,8 +126,10 @@ struct config_descriptor {
 };
 
 struct linux_context_priv {
+	/* have no authority to operate usb device directly */
 	int weak_authority;
 #ifdef __ANDROID__
+	/* android java context */
 	struct android_jni_context *android_jni;
 #endif
 };
@@ -378,7 +374,7 @@ static int op_init(struct libusb_context *ctx)
 {
 	struct kernel_version kversion;
 	const char *usbfs_path;
-	int r;
+	int r = LIBUSB_SUCCESS;
 	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 	if (get_kernel_version(ctx, &kversion) < 0)
@@ -423,19 +419,21 @@ static int op_init(struct libusb_context *ctx)
 		}
 	}
 
+	cpriv->weak_authority = default_context_options[LIBUSB_OPTION_WEAK_AUTHORITY].is_set;
+
 #ifdef __ANDROID__
-	if (android_default_javavm != NULL) {
-		r = android_jni(android_default_javavm, &cpriv->android_jni);
+	if (default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval != NULL) {
+		r = android_jni(
+			(JavaVM*)default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval,
+			&cpriv->android_jni);
 		if (r != LIBUSB_SUCCESS)
 			return r;
 		return android_jni_scan_devices(ctx);
 	}
 #endif
 
-	if (weak_authority) {
-		cpriv->weak_authority = weak_authority;
+	if (cpriv->weak_authority)
 		return LIBUSB_SUCCESS;
-	}
 
 	r = LIBUSB_SUCCESS;
 	if (init_count == 0) {
@@ -457,14 +455,13 @@ static int op_init(struct libusb_context *ctx)
 
 static void op_exit(struct libusb_context *ctx)
 {
-#ifdef __ANDROID__
 	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
+
+#ifdef __ANDROID__
 	if (cpriv->android_jni != NULL) {
 		android_jni_free(cpriv->android_jni);
 		return;
 	}
-#else
-	UNUSED(ctx);
 #endif
 
 	if (cpriv->weak_authority) {
@@ -480,27 +477,30 @@ static void op_exit(struct libusb_context *ctx)
 
 static int op_set_option(struct libusb_context *ctx, enum libusb_option option, va_list ap)
 {
-	UNUSED(ctx);
-	UNUSED(ap);
-
-	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
-		usbi_dbg("set libusb has weak authority");
-		weak_authority = 1;
-		return LIBUSB_SUCCESS;
 #ifdef __ANDROID__
-	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
-		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
-		int r = android_jnienv_javavm(jni_env, &android_default_javavm);
-		usbi_dbg("set default jnienv javavm %p %p", jni_env, android_default_javavm);
+	int r = LIBUSB_ERROR_NOT_SUPPORTED;
+	JavaVM **default_vmptr = (JavaVM **)&default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval;
+
+	if (NULL != ctx) {
 		return r;
-	} else if (option == LIBUSB_OPTION_ANDROID_JAVAVM) {
-		android_default_javavm = va_arg(ap, JavaVM *);
-		usbi_dbg("set default javavm %p", android_default_javavm);
-		return LIBUSB_SUCCESS;
-#endif
 	}
 
+	if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
+		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
+		r = android_jnienv_javavm(jni_env, default_vmptr);
+		usbi_dbg("set default jnienv javavm %p %p", jni_env, *default_vmptr);
+	} else if (option == LIBUSB_OPTION_ANDROID_JAVAVM) {
+		*default_vmptr = va_arg(ap, JavaVM *);
+		usbi_dbg("set default javavm %p", *default_vmptr);
+		r = LIBUSB_SUCCESS;
+	}
+	return r;
+#else
+	UNUSED(ctx);
+	UNUSED(option);
+	UNUSED(ap);
 	return LIBUSB_ERROR_NOT_SUPPORTED;
+#endif
 }
 
 #ifdef __ANDROID__
