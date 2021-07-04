@@ -96,7 +96,7 @@ int android_jni_request_permission(struct android_jni_context *jni, jobject devi
 
 /* Connects to a device.
  *
- * The connection jobject should be freed with android_jni_globalunref().
+ * The connection jobject should be freed with android_jni_disconnect().
  *
  * The descriptors buffer should be freed with free().
  *
@@ -105,7 +105,7 @@ int android_jni_request_permission(struct android_jni_context *jni, jobject devi
 int android_jni_connect(struct android_jni_context *jni, jobject device, jobject *connection,
                         int *fd, uint8_t **descriptors, size_t *descriptors_len);
 
-/* Disconnects from a device. */
+/* Disconnects from a device and frees connection object. */
 int android_jni_disconnect(struct android_jni_context *jni, jobject connection);
 
 /* Frees a global reference to an object. */

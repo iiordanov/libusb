@@ -20,6 +20,8 @@
 #include "linux_android_jni.h"
 #include "libusb.h"
 
+#include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -45,6 +47,7 @@ static int android_jni_gen_config(struct android_jni_context *jni,
 struct android_jni_context
 {
 	JavaVM *javavm;
+	pthread_key_t detach_pthread_key;
 	
 	/* jobjects need global references */
 	jclass Intent, PendingIntent;
@@ -116,6 +119,13 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 		return LIBUSB_ERROR_NO_MEM;
 
 	(*jni)->javavm = javavm;
+
+	r = pthread_key_create(&(*jni)->detach_pthread_key,
+	       	(void(*)(void*))(*javavm)->DetachCurrentThread);
+	if (r != 0) {
+		free(*jni);
+		return r == ENOMEM ? LIBUSB_ERROR_NO_MEM : LIBUSB_ERROR_OTHER;
+	}
 
 	r = android_jni_env(*jni, &jni_env);
 	if (r != LIBUSB_SUCCESS) {
@@ -205,9 +215,10 @@ int android_jni_free(struct android_jni_context *jni)
 	JNIEnv *jni_env;
 
 	r = android_jni_env(jni, &jni_env);
-	if (r != LIBUSB_SUCCESS)
+	if (r != LIBUSB_SUCCESS) {
 		free(jni);
 		return r;
+	}
 
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->Intent);
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->PendingIntent);
@@ -221,6 +232,7 @@ int android_jni_free(struct android_jni_context *jni)
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->permission_action);
 
 	free(jni);
+	return LIBUSB_SUCCESS;
 }
 
 int android_jni_detect_usbhost(struct android_jni_context *jni, int *has_usbhost)
@@ -599,6 +611,7 @@ int android_jni_disconnect(struct android_jni_context *jni, jobject connection)
 	(*jni_env)->CallVoidMethod(jni_env,
 		connection, jni->UsbDeviceConnection_close);
 
+	(*jni_env)->DeleteGlobalRef(jni_env, connection);
 	return LIBUSB_SUCCESS;
 }
 
@@ -786,15 +799,38 @@ static int android_jni_gen_epoint(struct android_jni_context *jni,
 	return LIBUSB_SUCCESS;
 }
 
+/* These strings are not actually used yet: the real
+   descriptors are downloaded from the device when it is
+   opened.  This function is only here to make it possibly
+   easier for an interested party to implement access to
+   strings before connection.
+
+   https://github.com/libusb/libusb/pull/875
+
+   Note that one android device was reported to require
+   user permission before returning a serial number.  The
+   code below fills the id with '0' if this permission is
+   not available yet.  If these strings are used, it would
+   be good to publicly document that possible limit on
+   serial number access. */
 static int android_jni_gen_string(JNIEnv *jni_env,
 	char **strings, size_t *strings_len, jstring str)
 {
-	size_t str_len, offset, idx;
+	size_t str_len, offset;
+	size_t idx = 0;
 	const uint16_t *str_ptr;
 	struct usbi_string_descriptor *desc;
 
+	if ((*jni_env)->ExceptionCheck(jni_env)) {
+		(*jni_env)->ExceptionClear(jni_env);
+		goto end;
+	}
+
 	if ((*jni_env)->IsSameObject(jni_env, str, NULL))
-		return 0;
+		goto end;
+
+	if (!*strings)
+		goto delinput;
 
 	str_ptr = (*jni_env)->GetStringChars(jni_env, str, NULL);
 	str_len = (*jni_env)->GetStringLength(jni_env, str) * sizeof(str_ptr[0]);
@@ -813,19 +849,23 @@ static int android_jni_gen_string(JNIEnv *jni_env,
 	if (offset == *strings_len) {
 		*strings_len += 2 + str_len;
 		*strings = usbi_reallocf(*strings, *strings_len);
-		if (!*strings)
-			return LIBUSB_ERROR_NO_MEM;
-		
-		desc = (struct usbi_string_descriptor *)(*strings + offset);
-		*desc = (struct usbi_string_descriptor){
-			.bLength = 2 + str_len,
-			.bDescriptorType = LIBUSB_DT_STRING,
-		};
-		memcpy(desc->wData, str_ptr, str_len);
+		if (*strings) {
+			desc = (struct usbi_string_descriptor *)(*strings + offset);
+			*desc = (struct usbi_string_descriptor){
+				.bLength = 2 + str_len,
+				.bDescriptorType = LIBUSB_DT_STRING,
+			};
+			memcpy(desc->wData, str_ptr, str_len);
+		} else {
+			idx = 0;
+		}
 	}
 
-	(*jni_env)->ReleaseStringChars(jni_env, str, str_ptr);
 
+	(*jni_env)->ReleaseStringChars(jni_env, str, str_ptr);
+delinput:
+	(*jni_env)->DeleteLocalRef(jni_env, str);
+end:
 	return idx;
 }
 
@@ -1047,6 +1087,19 @@ static int android_jni_fill_ctx_ids(struct android_jni_context *jni,
 static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env)
 {
 	JavaVM *javavm = jni->javavm;
-	return (*javavm)->AttachCurrentThread(javavm, jni_env, NULL) == JNI_OK ?
-		LIBUSB_SUCCESS : LIBUSB_ERROR_OTHER;
+	int status = (*javavm)->GetEnv(javavm, (void**)jni_env, JNI_VERSION_1_1);
+	if (status == JNI_EDETACHED) {
+		JavaVMAttachArgs thr_args = {
+			.version = JNI_VERSION_1_6,
+			.name = NULL,
+			.group = NULL
+		};
+		status = (*javavm)->AttachCurrentThread(javavm, jni_env, &thr_args);
+		if (status == JNI_OK) {
+			status = pthread_setspecific(jni->detach_pthread_key, javavm);
+			if (status == ENOMEM)
+				return LIBUSB_ERROR_NO_MEM;
+		}
+	}
+	return status == 0 ? LIBUSB_SUCCESS : LIBUSB_ERROR_OTHER;
 }
