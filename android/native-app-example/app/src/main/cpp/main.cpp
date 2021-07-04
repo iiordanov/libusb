@@ -48,8 +48,6 @@ void * sidethread_run(void * vctx) {
     return (void*)r;
 }
 
-<<<<<<< HEAD
-=======
 jint (*_DetachCurrentThread)(JavaVM*);
 jint DetachCurrentThreadProxy(JavaVM* vm)
 {
@@ -58,7 +56,6 @@ jint DetachCurrentThreadProxy(JavaVM* vm)
     return ret;
 }
 
->>>>>>> android-test
 void android_main(struct android_app * state) {
     libusb_context * ctx;
     pthread_t sidethread;
