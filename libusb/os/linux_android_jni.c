@@ -20,6 +20,8 @@
 #include "linux_android_jni.h"
 #include "libusb.h"
 
+#include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -45,6 +47,7 @@ static int android_jni_gen_config(struct android_jni_context *jni,
 struct android_jni_context
 {
 	JavaVM *javavm;
+	pthread_key_t detach_pthread_key;
 	
 	/* jobjects need global references */
 	jclass Intent, PendingIntent;
@@ -116,6 +119,13 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 		return LIBUSB_ERROR_NO_MEM;
 
 	(*jni)->javavm = javavm;
+
+	r = pthread_key_create(&(*jni)->detach_pthread_key,
+	       	(void(*)(void*))(*javavm)->DetachCurrentThread);
+	if (r != 0) {
+		free(*jni);
+		return r == ENOMEM ? LIBUSB_ERROR_NO_MEM : LIBUSB_ERROR_OTHER;
+	}
 
 	r = android_jni_env(*jni, &jni_env);
 	if (r != LIBUSB_SUCCESS) {
@@ -1077,6 +1087,19 @@ static int android_jni_fill_ctx_ids(struct android_jni_context *jni,
 static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env)
 {
 	JavaVM *javavm = jni->javavm;
-	return (*javavm)->AttachCurrentThread(javavm, jni_env, NULL) == JNI_OK ?
-		LIBUSB_SUCCESS : LIBUSB_ERROR_OTHER;
+	int status = (*javavm)->GetEnv(javavm, (void**)jni_env, JNI_VERSION_1_1);
+	if (status == JNI_EDETACHED) {
+		JavaVMAttachArgs thr_args = {
+			.version = JNI_VERSION_1_6,
+			.name = NULL,
+			.group = NULL
+		};
+		status = (*javavm)->AttachCurrentThread(javavm, jni_env, &thr_args);
+		if (status == JNI_OK) {
+			status = pthread_setspecific(jni->detach_pthread_key, javavm);
+			if (status == ENOMEM)
+				return LIBUSB_ERROR_NO_MEM;
+		}
+	}
+	return status == 0 ? LIBUSB_SUCCESS : LIBUSB_ERROR_OTHER;
 }
