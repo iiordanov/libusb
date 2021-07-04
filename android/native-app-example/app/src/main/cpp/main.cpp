@@ -67,7 +67,7 @@ jint DetachCurrentThreadProxy(JavaVM* vm)
 jint GetEnvProxy(JavaVM* vm, void**envptr, jint arg)
 {
     jint ret = _vm->functions->GetEnv(_vm, envptr, arg);
-    log("DetachCurrentThreadProxy: %i", ret);
+    log("GetEnvProxy: %i", ret);
     return ret;
 }
 JNIInvokeInterface _vm_proxy = {
