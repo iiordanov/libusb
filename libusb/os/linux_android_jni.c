@@ -789,22 +789,38 @@ static int android_jni_gen_epoint(struct android_jni_context *jni,
 	return LIBUSB_SUCCESS;
 }
 
-/* These strings are not actually used yet.  This function
-   is only here to make it possibly easier for an interested
-   party to implement access to strings before connection,
-   https://github.com/libusb/libusb/pull/875 */   
+/* These strings are not actually used yet: the real
+   descriptors are downloaded from the device when it is
+   opened.  This function is only here to make it possibly
+   easier for an interested party to implement access to
+   strings before connection.
+
+   https://github.com/libusb/libusb/pull/875
+
+   Note that one android device was reported to require
+   user permission before returning a serial number.  The
+   code below fills the id with '0' if this permission is
+   not available yet.  If these strings are used, it would
+   be good to publicly document that possible limit on
+   serial number access. */
 static int android_jni_gen_string(JNIEnv *jni_env,
 	char **strings, size_t *strings_len, jstring str)
 {
-	size_t str_len, offset, idx;
+	size_t str_len, offset;
+	size_t idx = 0;
 	const uint16_t *str_ptr;
 	struct usbi_string_descriptor *desc;
 
-	if (!*strings)
-		return LIBUSB_ERROR_NO_MEM;
+	if ((*jni_env)->ExceptionCheck(jni_env)) {
+		(*jni_env)->ExceptionClear(jni_env);
+		goto end;
+	}
 
 	if ((*jni_env)->IsSameObject(jni_env, str, NULL))
-		return 0;
+		goto end;
+
+	if (!*strings)
+		goto delinput;
 
 	str_ptr = (*jni_env)->GetStringChars(jni_env, str, NULL);
 	str_len = (*jni_env)->GetStringLength(jni_env, str) * sizeof(str_ptr[0]);
@@ -823,19 +839,23 @@ static int android_jni_gen_string(JNIEnv *jni_env,
 	if (offset == *strings_len) {
 		*strings_len += 2 + str_len;
 		*strings = usbi_reallocf(*strings, *strings_len);
-		if (!*strings)
-			return LIBUSB_ERROR_NO_MEM;
-		
-		desc = (struct usbi_string_descriptor *)(*strings + offset);
-		*desc = (struct usbi_string_descriptor){
-			.bLength = 2 + str_len,
-			.bDescriptorType = LIBUSB_DT_STRING,
-		};
-		memcpy(desc->wData, str_ptr, str_len);
+		if (*strings) {
+			desc = (struct usbi_string_descriptor *)(*strings + offset);
+			*desc = (struct usbi_string_descriptor){
+				.bLength = 2 + str_len,
+				.bDescriptorType = LIBUSB_DT_STRING,
+			};
+			memcpy(desc->wData, str_ptr, str_len);
+		} else {
+			idx = 0;
+		}
 	}
 
-	(*jni_env)->ReleaseStringChars(jni_env, str, str_ptr);
 
+	(*jni_env)->ReleaseStringChars(jni_env, str, str_ptr);
+delinput:
+	(*jni_env)->DeleteLocalRef(jni_env, str);
+end:
 	return idx;
 }
 

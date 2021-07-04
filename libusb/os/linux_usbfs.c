@@ -635,6 +635,9 @@ static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busn
 	if (r < 0)
 		return r;
 
+	if (strings == 0)
+		return LIBUSB_ERROR_NO_MEM;
+
 	free(strings);
 
 	return LIBUSB_SUCCESS;
