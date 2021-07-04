@@ -10,8 +10,8 @@ void android_main(struct android_app * state) {
     libusb_device ** list;
     int r;
 
-    r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JNIENV, state->activity->env, 0);
-    log("libusb_set_option ANDROID_JNIENV: %s", libusb_strerror(r));
+    r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JAVAVM, state->activity->vm, 0);
+    log("libusb_set_option ANDROID_JAVAVM: %s", libusb_strerror(r));
 
     r = libusb_init(&ctx);
     log("libusb_init: %s", libusb_strerror(r));
