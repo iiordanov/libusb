@@ -48,12 +48,28 @@ void * sidethread_run(void * vctx) {
     return (void*)r;
 }
 
+<<<<<<< HEAD
+=======
+jint (*_DetachCurrentThread)(JavaVM*);
+jint DetachCurrentThreadProxy(JavaVM* vm)
+{
+    jint ret = _DetachCurrentThread(vm);
+    log("DetachCurrentThread: %i", ret);
+    return ret;
+}
+
+>>>>>>> android-test
 void android_main(struct android_app * state) {
     libusb_context * ctx;
     pthread_t sidethread;
     void *sidethread_ret;
     int r;
 
+    // outputs logs to show libusb's new thread is detached when closed
+    _DetachCurrentThread = state->activity->vm->functions->DetachCurrentThread;
+    ((JNIInvokeInterface*)state->activity->vm)->DetachCurrentThread = DetachCurrentThreadProxy;
+
+    // libusb
     r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JAVAVM, state->activity->vm, 0);
     log("libusb_set_option ANDROID_JAVAVM: %s", libusb_strerror(r));
 
@@ -63,15 +79,12 @@ void android_main(struct android_app * state) {
     r = libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_DEBUG, 0);
     log("libusb_set_option LOG_LEVEL: %s", libusb_strerror(r));
     
+    // process devices in a new thread to test detachment
     r = pthread_create(&sidethread, 0, sidethread_run, ctx);
     log("pthread_create: %i", r);
 
     r = pthread_join(sidethread, &sidethread_ret);
     r = (intptr_t)sidethread_ret;
-
-    JNIEnv *jni_env;
-    r = state->activity->vm->GetEnv((void**)&jni_env, JNI_VERSION_1_1);
-    log("GetEnv after thread = %i ; JNI_EDETACHED = %i", r, JNI_EDETACHED);
 
     libusb_exit(ctx);
 }
