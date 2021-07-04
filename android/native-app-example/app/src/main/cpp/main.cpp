@@ -83,6 +83,9 @@ void android_main(struct android_app * state) {
     void *sidethread_ret;
     int r;
 
+    // back proxy
+    _vm = state->activity->vm;
+
     // libusb
     r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JAVAVM, &vm_proxy/*state->activity->vm*/, 0);
     log("libusb_set_option ANDROID_JAVAVM: %s", libusb_strerror(r));
