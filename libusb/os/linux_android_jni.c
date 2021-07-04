@@ -126,6 +126,8 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 		free(*jni);
 		return r == ENOMEM ? LIBUSB_ERROR_NO_MEM : LIBUSB_ERROR_OTHER;
 	}
+	r = (*javavm)->DetachCurrentThread(javavm);
+	usbi_dbg("DetachCurrentThread: %i", r);
 
 	r = android_jni_env(*jni, &jni_env);
 	if (r != LIBUSB_SUCCESS) {
