@@ -101,7 +101,7 @@ static int init_count = 0;
 
 #ifdef __ANDROID__
 /* have no authority to operate usb device directly */
-static int default_weak_authority = 0;
+static int weak_authority = 0;
 
 /* user-provided JavaVM to use */
 JavaVM *android_default_javavm = NULL;
@@ -432,8 +432,8 @@ static int op_init(struct libusb_context *ctx)
 			return r;
 		return android_jni_scan_devices(ctx);
 	}
-	if (default_weak_authority) {
-		cpriv->weak_authority = default_weak_authority;
+	if (weak_authority) {
+		cpriv->weak_authority = weak_authority;
 		return LIBUSB_SUCCESS;
 	}
 #else
@@ -489,9 +489,8 @@ static int op_set_option(struct libusb_context *ctx, enum libusb_option option, 
 
 #ifdef __ANDROID__
 	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
-		int parameter = va_arg(ap, int);
-		default_weak_authority = !parameter;
-		usbi_dbg("set libusb has weak authority: %d", default_weak_authority);
+		usbi_dbg("set libusb has weak authority");
+		weak_authority = 1;
 		return LIBUSB_SUCCESS;
 	} else if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
 		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
