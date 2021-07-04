@@ -3,21 +3,14 @@
 #include <android/log.h>
 #include <android_native_app_glue.h>
 
+#include <pthread.h>
+
 #define log(...) __android_log_print(ANDROID_LOG_INFO, "libusb-example", __VA_ARGS__)
 
-void android_main(struct android_app * state) {
-    libusb_context * ctx;
+void * sidethread_run(void * vctx) {
+    libusb_context * ctx = (libusb_context *)vctx;
     libusb_device ** list;
-    int r;
-
-    r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JAVAVM, state->activity->vm, 0);
-    log("libusb_set_option ANDROID_JAVAVM: %s", libusb_strerror(r));
-
-    r = libusb_init(&ctx);
-    log("libusb_init: %s", libusb_strerror(r));
-
-    r = libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_DEBUG, 0);
-    log("libusb_set_option LOG_LEVEL: %s", libusb_strerror(r));
+    intptr_t r;
 
     r = libusb_get_device_list(ctx, &list);
     log("libusb_get_device_list: %s", libusb_strerror(r > 0 ? LIBUSB_SUCCESS : r));
@@ -51,7 +44,44 @@ void android_main(struct android_app * state) {
     }
 
     libusb_free_device_list(list, 1);
+
+    return (void*)r;
+}
+
+jint (*_DetachCurrentThread)(JavaVM*);
+jint DetachCurrentThreadProxy(JavaVM* vm)
+{
+    jint ret = _DetachCurrentThread(vm);
+    log("DetachCurrentThread: %i", ret);
+    return ret;
+}
+
+void android_main(struct android_app * state) {
+    libusb_context * ctx;
+    pthread_t sidethread;
+    void *sidethread_ret;
+    int r;
+
+    // outputs logs to show libusb's new thread is detached when closed
+    _DetachCurrentThread = state->activity->vm->functions->DetachCurrentThread;
+    ((JNIInvokeInterface*)state->activity->vm)->DetachCurrentThread = DetachCurrentThreadProxy;
+
+    // libusb
+    r = libusb_set_option(0, LIBUSB_OPTION_ANDROID_JAVAVM, state->activity->vm, 0);
+    log("libusb_set_option ANDROID_JAVAVM: %s", libusb_strerror(r));
+
+    r = libusb_init(&ctx);
+    log("libusb_init: %s", libusb_strerror(r));
+
+    r = libusb_set_option(ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_DEBUG, 0);
+    log("libusb_set_option LOG_LEVEL: %s", libusb_strerror(r));
     
+    // process devices in a new thread to test detachment
+    r = pthread_create(&sidethread, 0, sidethread_run, ctx);
+    log("pthread_create: %i", r);
+
+    r = pthread_join(sidethread, &sidethread_ret);
+    r = (intptr_t)sidethread_ret;
 
     libusb_exit(ctx);
 }
