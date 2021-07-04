@@ -52,25 +52,25 @@ void * sidethread_run(void * vctx) {
 JavaVM * _vm;
 jint AttachCurrentThreadProxy(JavaVM* vm, JNIEnv** envptr, void* args)
 {
-    jint ret = (*_vm)->AttachCurrentThread(_vm, envptr, args);
+    jint ret = _vm->functions->AttachCurrentThread(_vm, envptr, args);
     log("AttachCurrentThreadProxy: %i", ret);
     return ret;
 }
 
 jint DetachCurrentThreadProxy(JavaVM* vm)
 {
-    jint ret = (*_vm)->DetachCurrentThread(_vm);
+    jint ret = _vm->functions->DetachCurrentThread(_vm);
     log("DetachCurrentThreadProxy: %i", ret);
     return ret;
 }
 
 jint GetEnvProxy(JavaVM* vm, void**envptr, jint arg)
 {
-    jint ret = (*_vm)->GetEnv(_vm, envptr, arg);
+    jint ret = _vm->functions->GetEnv(_vm, envptr, arg);
     log("DetachCurrentThreadProxy: %i", ret);
     return ret;
 }
-JNIInvokInterface vm_proxy = {
+JNIInvokeInterface vm_proxy = {
 	.AttachCurrentThread = AttachCurrentThreadProxy,
 	.DetachCurrentThread = DetachCurrentThreadProxy,
 	.GetEnv = GetEnvProxy,
