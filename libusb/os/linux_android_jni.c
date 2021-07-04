@@ -120,12 +120,14 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 
 	(*jni)->javavm = javavm;
 
+	usbi_dbg("Creating DetachCurrentThread key ...", r);
 	r = pthread_key_create(&(*jni)->detach_pthread_key,
 	       	(void(*)(void*))(*javavm)->DetachCurrentThread);
 	if (r != 0) {
 		free(*jni);
 		return r == ENOMEM ? LIBUSB_ERROR_NO_MEM : LIBUSB_ERROR_OTHER;
 	}
+	usbi_dbg("Calling DetachCurrentThread ...", r);
 	r = (*javavm)->DetachCurrentThread(javavm);
 	usbi_dbg("DetachCurrentThread: %i", r);
 
@@ -1089,6 +1091,7 @@ static int android_jni_fill_ctx_ids(struct android_jni_context *jni,
 static int android_jni_env(struct android_jni_context *jni, JNIEnv **jni_env)
 {
 	JavaVM *javavm = jni->javavm;
+	usbi_dbg("Calling GetEnv ...");
 	int status = (*javavm)->GetEnv(javavm, (void**)jni_env, JNI_VERSION_1_1);
 	if (status == JNI_EDETACHED) {
 		JavaVMAttachArgs thr_args = {
