@@ -43,7 +43,7 @@ static libusb_log_cb log_handler;
 struct libusb_context *usbi_default_context;
 static int default_context_refcnt;
 static usbi_mutex_static_t default_context_lock = USBI_MUTEX_INITIALIZER;
-static struct usbi_option default_context_options[LIBUSB_OPTION_MAX];
+struct usbi_option default_context_options[LIBUSB_OPTION_MAX];
 
 
 usbi_mutex_static_t active_contexts_lock = USBI_MUTEX_INITIALIZER;
@@ -2222,10 +2222,14 @@ int API_EXPORTED libusb_set_option(libusb_context *ctx,
 	case LIBUSB_OPTION_WEAK_AUTHORITY:
 	case LIBUSB_OPTION_ANDROID_JNIENV:
 	case LIBUSB_OPTION_ANDROID_JAVAVM:
+		usbi_mutex_static_lock(&default_context_lock);
 		if (usbi_backend.set_option)
-			return usbi_backend.set_option(ctx, option, ap);
+			r = usbi_backend.set_option(ctx, option, ap);
+		else
+			r = LIBUSB_ERROR_NOT_SUPPORTED;
+		usbi_mutex_static_unlock(&default_context_lock);
 
-		return LIBUSB_ERROR_NOT_SUPPORTED;
+		return r;
 		break;
 
 	case LIBUSB_OPTION_MAX:
