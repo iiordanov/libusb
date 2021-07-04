@@ -420,14 +420,18 @@ static int op_init(struct libusb_context *ctx)
 	}
 
 	cpriv->weak_authority = default_context_options[LIBUSB_OPTION_WEAK_AUTHORITY].is_set;
+	usbi_dbg("weak_authority: %i", cpriv->weak_authority);
 
 #ifdef __ANDROID__
+	usbi_dbg("android");
 	if (default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval != NULL) {
+		usbi_dbg("android_jni init");
 		r = android_jni(
 			(JavaVM*)default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval,
 			&cpriv->android_jni);
 		if (r != LIBUSB_SUCCESS)
 			return r;
+		usbi_dbg("android_jni scan");
 		return android_jni_scan_devices(ctx);
 	}
 #endif
