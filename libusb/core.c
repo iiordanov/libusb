@@ -2205,6 +2205,7 @@ int API_EXPORTED libusb_set_option(libusb_context *ctx,
 	case LIBUSB_OPTION_USE_USBDK:
 	case LIBUSB_OPTION_WEAK_AUTHORITY:
 	case LIBUSB_OPTION_ANDROID_JNIENV:
+	case LIBUSB_OPTION_ANDROID_JAVAVM:
 		if (usbi_backend.set_option)
 			r = usbi_backend.set_option(ctx, option, ap);
 		else
