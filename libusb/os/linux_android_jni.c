@@ -120,14 +120,14 @@ int android_jni(JavaVM *javavm, struct android_jni_context **jni)
 
 	(*jni)->javavm = javavm;
 
-	usbi_dbg("Creating DetachCurrentThread key ...", r);
+	usbi_dbg("Creating DetachCurrentThread key ...");
 	r = pthread_key_create(&(*jni)->detach_pthread_key,
 	       	(void(*)(void*))(*javavm)->DetachCurrentThread);
 	if (r != 0) {
 		free(*jni);
 		return r == ENOMEM ? LIBUSB_ERROR_NO_MEM : LIBUSB_ERROR_OTHER;
 	}
-	usbi_dbg("Calling DetachCurrentThread ...", r);
+	usbi_dbg("Calling DetachCurrentThread ...");
 	r = (*javavm)->DetachCurrentThread(javavm);
 	usbi_dbg("DetachCurrentThread: %i", r);
 
