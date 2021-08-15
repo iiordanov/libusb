@@ -317,14 +317,14 @@ void usbi_log(struct libusb_context *ctx, enum libusb_log_level level,
 #define usbi_err(ctx, ...)	_usbi_log(ctx, LIBUSB_LOG_LEVEL_ERROR, __VA_ARGS__)
 #define usbi_warn(ctx, ...)	_usbi_log(ctx, LIBUSB_LOG_LEVEL_WARNING, __VA_ARGS__)
 #define usbi_info(ctx, ...)	_usbi_log(ctx, LIBUSB_LOG_LEVEL_INFO, __VA_ARGS__)
-#define usbi_dbg(...)		_usbi_log(NULL, LIBUSB_LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define usbi_dbg(ctx ,...)      	_usbi_log(ctx, LIBUSB_LOG_LEVEL_DEBUG, __VA_ARGS__)
 
 #else /* ENABLE_LOGGING */
 
 #define usbi_err(ctx, ...)	UNUSED(ctx)
 #define usbi_warn(ctx, ...)	UNUSED(ctx)
 #define usbi_info(ctx, ...)	UNUSED(ctx)
-#define usbi_dbg(...)		do {} while (0)
+#define usbi_dbg(ctx, ...)	do {} while (0)
 
 #endif /* ENABLE_LOGGING */
 
@@ -434,7 +434,16 @@ struct libusb_context {
 	struct list_head list;
 };
 
+struct usbi_option {
+  int is_set;
+  union {
+    int ival;
+    void *pval;
+  } arg;
+};
+
 extern struct libusb_context *usbi_default_context;
+extern struct usbi_option default_context_options[LIBUSB_OPTION_MAX];
 
 extern struct list_head active_contexts_list;
 extern usbi_mutex_static_t active_contexts_lock;
@@ -657,6 +666,15 @@ struct usbi_interface_descriptor {
 	uint8_t  iInterface;
 } LIBUSB_PACKED;
 
+struct usbi_endpoint_descriptor {
+	uint8_t  bLength;
+	uint8_t  bDescriptorType;
+	uint8_t  bEndpointAddress;
+	uint8_t  bmAttributes;
+	uint16_t wMaxPacketSize;
+	uint8_t  bInterval;
+} LIBUSB_PACKED;
+
 struct usbi_string_descriptor {
 	uint8_t  bLength;
 	uint8_t  bDescriptorType;
@@ -790,13 +808,6 @@ struct usbi_event_source {
 int usbi_add_event_source(struct libusb_context *ctx, usbi_os_handle_t os_handle,
 	short poll_events);
 void usbi_remove_event_source(struct libusb_context *ctx, usbi_os_handle_t os_handle);
-
-struct usbi_option {
-  int is_set;
-  union {
-    int ival;
-  } arg;
-};
 
 /* OS event abstraction */
 

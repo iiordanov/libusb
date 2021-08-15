@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode:t ; c-basic-offset:8 -*- */
 /*
  * Hotplug functions for libusb
- * Copyright © 2012-2013 Nathan Hjelm <hjelmn@mac.com>
+ * Copyright © 2012-2021 Nathan Hjelm <hjelmn@mac.com>
  * Copyright © 2012-2013 Peter Stuge <peter@stuge.se>
  *
  * This library is free software; you can redistribute it and/or
@@ -166,7 +166,6 @@ void usbi_hotplug_exit(struct libusb_context *ctx)
 	struct usbi_hotplug_callback *hotplug_cb, *next_cb;
 	struct usbi_hotplug_message *msg;
 	struct libusb_device *dev, *next_dev;
-	int devices_released;
 
 	/* check for hotplug support */
 	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG))
@@ -192,19 +191,22 @@ void usbi_hotplug_exit(struct libusb_context *ctx)
 	}
 
 	/* free all discovered devices. due to parent references loop until no devices are freed. */
-	do {
-		devices_released = 0;
-		for_each_device_safe(ctx, dev, next_dev) {
-			/* remove the device from the usb_devs list only if there are no
-			 * references held, otherwise leave it on the list so that a
-			 * warning message will be shown */
-			if (usbi_atomic_load(&dev->refcnt) == 1) {
-				++devices_released;
-				list_del(&dev->list);
-			}
-			libusb_unref_device(dev);
+	for_each_device_safe(ctx, dev, next_dev) {
+		/* remove the device from the usb_devs list only if there are no
+		 * references held, otherwise leave it on the list so that a
+		 * warning message will be shown */
+		if (usbi_atomic_load(&dev->refcnt) == 1) {
+			list_del(&dev->list);
 		}
-	} while (devices_released > 0);
+		if (dev->parent_dev && usbi_atomic_load(&dev->parent_dev->refcnt) == 1) {
+			/* the parent was before this device in the list and will be released.
+			   remove it from the list. this is safe as parent_dev can not be
+			   equal to next_dev. */
+			assert (dev->parent_dev != next_dev);
+			list_del(&dev->parent_dev->list);
+		}
+		libusb_unref_device(dev);
+	}
 
 	usbi_mutex_destroy(&ctx->hotplug_cbs_lock);
 }
@@ -305,7 +307,7 @@ void usbi_hotplug_process(struct libusb_context *ctx, struct list_head *hotplug_
 	/* free any callbacks that have unregistered */
 	for_each_hotplug_cb_safe(ctx, hotplug_cb, next_cb) {
 		if (hotplug_cb->flags & USBI_HOTPLUG_NEEDS_FREE) {
-			usbi_dbg("freeing hotplug cb %p with handle %d",
+			usbi_dbg(ctx, "freeing hotplug cb %p with handle %d",
 				hotplug_cb, hotplug_cb->handle);
 			list_del(&hotplug_cb->list);
 			free(hotplug_cb);
@@ -372,7 +374,7 @@ int API_EXPORTED libusb_hotplug_register_callback(libusb_context *ctx,
 
 	usbi_mutex_unlock(&ctx->hotplug_cbs_lock);
 
-	usbi_dbg("new hotplug cb %p with handle %d", hotplug_cb, hotplug_cb->handle);
+	usbi_dbg(ctx, "new hotplug cb %p with handle %d", hotplug_cb, hotplug_cb->handle);
 
 	if ((flags & LIBUSB_HOTPLUG_ENUMERATE) && (events & LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
 		ssize_t i, len;
@@ -409,7 +411,7 @@ void API_EXPORTED libusb_hotplug_deregister_callback(libusb_context *ctx,
 	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG))
 		return;
 
-	usbi_dbg("deregister hotplug cb %d", callback_handle);
+	usbi_dbg(ctx, "deregister hotplug cb %d", callback_handle);
 
 	ctx = usbi_get_context(ctx);
 
@@ -447,7 +449,7 @@ void * LIBUSB_CALL libusb_hotplug_get_user_data(libusb_context *ctx,
 	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG))
 		return NULL;
 
-	usbi_dbg("get hotplug cb %d user data", callback_handle);
+	usbi_dbg(ctx, "get hotplug cb %d user data", callback_handle);
 
 	ctx = usbi_get_context(ctx);
 

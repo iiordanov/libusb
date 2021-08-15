@@ -38,6 +38,10 @@
 #include <sys/vfs.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+#include "linux_android_jni.h"
+#endif
+
 /* sysfs vs usbfs:
  * opening a usbfs node causes the device to be resumed, so we attempt to
  * avoid this during enumeration.
@@ -96,8 +100,7 @@ static int sysfs_available = -1;
 static int init_count = 0;
 
 #ifdef __ANDROID__
-/* have no authority to operate usb device directly */
-static int weak_authority = 0;
+static int android_jni_scan_devices(struct libusb_context *ctx);
 #endif
 
 /* Serialize scan-devices, event-thread, and poll */
@@ -105,6 +108,7 @@ usbi_mutex_static_t linux_hotplug_lock = USBI_MUTEX_INITIALIZER;
 
 static int linux_scan_devices(struct libusb_context *ctx);
 static int detach_kernel_driver_and_claim(struct libusb_device_handle *, uint8_t);
+static int parse_config_descriptors(struct libusb_device *dev);
 
 #if !defined(HAVE_LIBUDEV)
 static int linux_default_scan_devices(struct libusb_context *ctx);
@@ -121,12 +125,24 @@ struct config_descriptor {
 	size_t actual_len;
 };
 
+struct linux_context_priv {
+	/* have no authority to operate usb device directly */
+	int no_device_discovery;
+#ifdef __ANDROID__
+	/* android java context */
+	struct android_jni_context *android_jni;
+#endif
+};
+
 struct linux_device_priv {
 	char *sysfs_dir;
 	void *descriptors;
 	size_t descriptors_len;
 	struct config_descriptor *config_descriptors;
 	int active_config; /* cache val for !sysfs_available  */
+#ifdef __ANDROID__
+	jobject android_jni_device;
+#endif
 };
 
 struct linux_device_handle_priv {
@@ -134,6 +150,9 @@ struct linux_device_handle_priv {
 	int fd_removed;
 	int fd_keep;
 	uint32_t caps;
+#ifdef __ANDROID__
+	jobject android_jni_connection;
+#endif
 };
 
 enum reap_action {
@@ -236,11 +255,11 @@ static int is_usbdev_entry(const char *name, uint8_t *bus_p, uint8_t *dev_p)
 	if (sscanf(name, "usbdev%d.%d", &busnum, &devnum) != 2)
 		return 0;
 	if (busnum < 0 || busnum > UINT8_MAX || devnum < 0 || devnum > UINT8_MAX) {
-		usbi_dbg("invalid usbdev format '%s'", name);
+		usbi_dbg(NULL, "invalid usbdev format '%s'", name);
 		return 0;
 	}
 
-	usbi_dbg("found: %s", name);
+	usbi_dbg(NULL, "found: %s", name);
 	if (bus_p)
 		*bus_p = (uint8_t)busnum;
 	if (dev_p)
@@ -325,7 +344,7 @@ static int get_kernel_version(struct libusb_context *ctx,
 	if (atoms < 3)
 		ver->sublevel = -1;
 
-	usbi_dbg("reported kernel version is %s", uts.release);
+	usbi_dbg(ctx, "reported kernel version is %s", uts.release);
 
 	return 0;
 }
@@ -355,7 +374,8 @@ static int op_init(struct libusb_context *ctx)
 {
 	struct kernel_version kversion;
 	const char *usbfs_path;
-	int r;
+	int r = LIBUSB_SUCCESS;
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 	if (get_kernel_version(ctx, &kversion) < 0)
 		return LIBUSB_ERROR_OTHER;
@@ -373,7 +393,7 @@ static int op_init(struct libusb_context *ctx)
 		return LIBUSB_ERROR_OTHER;
 	}
 
-	usbi_dbg("found usbfs at %s", usbfs_path);
+	usbi_dbg(ctx, "found usbfs at %s", usbfs_path);
 
 	if (!max_iso_packet_len) {
 		if (kernel_version_ge(&kversion, 5, 2, 0))
@@ -384,14 +404,14 @@ static int op_init(struct libusb_context *ctx)
 			max_iso_packet_len = 8192;
 	}
 
-	usbi_dbg("max iso packet length is (likely) %u bytes", max_iso_packet_len);
+	usbi_dbg(ctx, "max iso packet length is (likely) %u bytes", max_iso_packet_len);
 
 	if (sysfs_available == -1) {
 		struct statfs statfsbuf;
 
 		r = statfs(SYSFS_MOUNT_PATH, &statfsbuf);
 		if (r == 0 && statfsbuf.f_type == SYSFS_MAGIC) {
-			usbi_dbg("sysfs is available");
+			usbi_dbg(ctx, "sysfs is available");
 			sysfs_available = 1;
 		} else {
 			usbi_warn(ctx, "sysfs not mounted");
@@ -399,11 +419,23 @@ static int op_init(struct libusb_context *ctx)
 		}
 	}
 
+	cpriv->no_device_discovery =
+		default_context_options[LIBUSB_OPTION_NO_DEVICE_DISCOVERY].is_set ||
+		default_context_options[LIBUSB_OPTION_WEAK_AUTHORITY].is_set;
+
 #ifdef __ANDROID__
-	if (weak_authority) {
-		return LIBUSB_SUCCESS;
+	if (default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval != NULL) {
+		r = android_jni(
+			(JavaVM*)default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval,
+			&cpriv->android_jni);
+		if (r != LIBUSB_SUCCESS)
+			return r;
+		return android_jni_scan_devices(ctx);
 	}
 #endif
+
+	if (cpriv->no_device_discovery)
+		return LIBUSB_SUCCESS;
 
 	r = LIBUSB_SUCCESS;
 	if (init_count == 0) {
@@ -425,13 +457,18 @@ static int op_init(struct libusb_context *ctx)
 
 static void op_exit(struct libusb_context *ctx)
 {
-	UNUSED(ctx);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 #ifdef __ANDROID__
-	if (weak_authority) {
+	if (cpriv->android_jni != NULL) {
+		android_jni_free(cpriv->android_jni);
 		return;
 	}
 #endif
+
+	if (cpriv->no_device_discovery) {
+		return;
+	}
 
 	assert(init_count != 0);
 	if (!--init_count) {
@@ -442,21 +479,160 @@ static void op_exit(struct libusb_context *ctx)
 
 static int op_set_option(struct libusb_context *ctx, enum libusb_option option, va_list ap)
 {
-	UNUSED(ctx);
-	UNUSED(ap);
+	if (NULL != ctx) {
+		return LIBUSB_ERROR_NOT_SUPPORTED;
+	}
 
 #ifdef __ANDROID__
-	if (option == LIBUSB_OPTION_WEAK_AUTHORITY) {
-		usbi_dbg("set libusb has weak authority");
-		weak_authority = 1;
+	JavaVM **default_vmptr = (JavaVM **)&default_context_options[LIBUSB_OPTION_ANDROID_JAVAVM].arg.pval;
+
+	if (option == LIBUSB_OPTION_ANDROID_JNIENV) {
+		JNIEnv * jni_env = va_arg(ap, JNIEnv *);
+		int r = android_jnienv_javavm(jni_env, default_vmptr);
+		usbi_dbg(ctx, "set default jnienv javavm %p %p", jni_env, *default_vmptr);
+		return r;
+	} else if (option == LIBUSB_OPTION_ANDROID_JAVAVM) {
+		*default_vmptr = va_arg(ap, JavaVM *);
+		usbi_dbg(ctx, "set default javavm %p", *default_vmptr);
 		return LIBUSB_SUCCESS;
 	}
 #else
-	UNUSED(option);
+	UNUSED(ap);
 #endif
+
+	if (option == LIBUSB_OPTION_NO_DEVICE_DISCOVERY ||
+	    option == LIBUSB_OPTION_WEAK_AUTHORITY) {
+		usbi_dbg(ctx, "no enumeration will be performed");
+		return LIBUSB_SUCCESS;
+	}
 
 	return LIBUSB_ERROR_NOT_SUPPORTED;
 }
+
+#ifdef __ANDROID__
+
+static int android_jni_scan_devices(struct libusb_context *ctx)
+{
+	/* Access and use the Android API via jni_env */
+
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
+	int r, has_usbhost;
+
+	struct android_jni_devices *devices;
+	jobject device;
+	uint8_t busnum, devaddr;
+
+	r = android_jni_detect_usbhost(cpriv->android_jni, &has_usbhost);
+
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	if (!has_usbhost) {
+		usbi_dbg(ctx, "This device does not have the android.hardware.usb.host feature");
+		return LIBUSB_ERROR_NOT_SUPPORTED;
+	}
+
+	usbi_dbg(ctx, "enumerating usb devices using android api");
+
+	r = android_jni_devices_alloc(cpriv->android_jni, &devices);
+
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	while (LIBUSB_SUCCESS ==
+		android_jni_devices_next(devices, &device, &busnum, &devaddr))
+	{
+
+		if (linux_enumerate_device(ctx, busnum, devaddr, NULL) < 0)
+			usbi_dbg(ctx, "failed to enumerate android device %d/%d", busnum, devaddr);
+
+		android_jni_globalunref(cpriv->android_jni, device);
+	}
+
+	android_jni_devices_free(devices);
+
+	return LIBUSB_SUCCESS;
+}
+
+static int get_android_jni_fd(struct libusb_device_handle *handle)
+{
+	struct linux_context_priv *cpriv = usbi_get_context_priv(HANDLE_CTX(handle));
+	struct libusb_device *dev = handle->dev;
+	struct linux_device_priv *priv = usbi_get_device_priv(dev);
+	struct linux_device_handle_priv *hpriv = usbi_get_device_handle_priv(handle);
+
+	int r, fd;
+	uint8_t *descriptors;
+	size_t descriptors_len;
+
+	r = android_jni_connect(cpriv->android_jni, priv->android_jni_device,
+		&hpriv->android_jni_connection, &fd, &descriptors, &descriptors_len);
+	if (r != LIBUSB_SUCCESS) {
+		if (r == LIBUSB_ERROR_ACCESS)
+			android_jni_request_permission(cpriv->android_jni, priv->android_jni_device);
+		return r;
+	}
+
+	free(priv->descriptors);
+	priv->descriptors = descriptors;
+	priv->descriptors_len = descriptors_len;
+
+	/* right now android_jni_device is only filled if sysfs is not being used,
+	 * so localize the device descriptor as if this were usbfs */
+	usbi_localize_device_descriptor(priv->descriptors);
+
+	memcpy(&dev->device_descriptor, priv->descriptors, LIBUSB_DT_DEVICE_SIZE);
+	parse_config_descriptors(dev);
+
+	return fd;
+}
+
+static int android_jni_initialize_device(struct libusb_device *dev, uint8_t busnum,
+	uint8_t devaddr)
+{
+	struct libusb_context *ctx = DEVICE_CTX(dev);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
+	struct linux_device_priv *priv = usbi_get_device_priv(dev);
+
+	struct android_jni_devices *devices;
+	jobject iter_device;
+	uint8_t iter_busnum, iter_devaddr;
+
+	int r = android_jni_devices_alloc(cpriv->android_jni, &devices);
+	if (r != LIBUSB_SUCCESS)
+		return r;
+
+	priv->android_jni_device = NULL;
+
+	while (LIBUSB_SUCCESS ==
+		android_jni_devices_next(devices, &iter_device,
+		                         &iter_busnum, &iter_devaddr))
+	{
+		if (iter_busnum == busnum && iter_devaddr == devaddr) {
+			priv->android_jni_device = iter_device;
+			break;
+		} else {
+			android_jni_globalunref(cpriv->android_jni, iter_device);
+		}
+	}
+
+	android_jni_devices_free(devices);
+
+	if (priv->android_jni_device == NULL)
+	{
+		return LIBUSB_ERROR_NO_DEVICE;
+	}
+
+	r = android_jni_gen_descriptors(
+		cpriv->android_jni, priv->android_jni_device,
+		(uint8_t**)&priv->descriptors, &priv->descriptors_len);
+	if (r < 0)
+		return r;
+
+	return LIBUSB_SUCCESS;
+}
+
+#endif
 
 static int linux_scan_devices(struct libusb_context *ctx)
 {
@@ -598,7 +774,7 @@ int linux_get_device_address(struct libusb_context *ctx, int detached,
 	int sysfs_val;
 	int r;
 
-	usbi_dbg("getting address for device: %s detached: %d", sys_name, detached);
+	usbi_dbg(ctx, "getting address for device: %s detached: %d", sys_name, detached);
 	/* can't use sysfs to read the bus and device number if the
 	 * device has been detached */
 	if (!sysfs_available || detached || !sys_name) {
@@ -627,7 +803,7 @@ int linux_get_device_address(struct libusb_context *ctx, int detached,
 		return LIBUSB_SUCCESS;
 	}
 
-	usbi_dbg("scan %s", sys_name);
+	usbi_dbg(ctx, "scan %s", sys_name);
 
 	r = read_sysfs_attr(ctx, sys_name, "busnum", UINT8_MAX, &sysfs_val);
 	if (r < 0)
@@ -639,7 +815,7 @@ int linux_get_device_address(struct libusb_context *ctx, int detached,
 		return r;
 	*devaddr = (uint8_t)sysfs_val;
 
-	usbi_dbg("bus=%u dev=%u", *busnum, *devaddr);
+	usbi_dbg(ctx, "bus=%u dev=%u", *busnum, *devaddr);
 
 	return LIBUSB_SUCCESS;
 }
@@ -913,8 +1089,9 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 {
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
 	struct libusb_context *ctx = DEVICE_CTX(dev);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 	size_t alloc_len;
-	int fd, speed, r;
+	int fd, speed, r, skip_fd = 0;
 	ssize_t nb;
 
 	dev->bus_number = busnum;
@@ -945,51 +1122,64 @@ static int initialize_device(struct libusb_device *dev, uint8_t busnum,
 	/* cache descriptors in memory */
 	if (sysfs_dir) {
 		fd = open_sysfs_attr(ctx, sysfs_dir, "descriptors");
-	} else if (wrapped_fd < 0) {
-		fd = get_usbfs_fd(dev, O_RDONLY, 0);
-	} else {
+	} else if (wrapped_fd >= 0) {
 		fd = wrapped_fd;
 		r = lseek(fd, 0, SEEK_SET);
 		if (r < 0) {
 			usbi_err(ctx, "lseek failed, errno=%d", errno);
 			return LIBUSB_ERROR_IO;
 		}
+#ifdef __ANDROID__
+	} else if (cpriv->android_jni != NULL) {
+		r = android_jni_initialize_device(dev, busnum, devaddr);
+		if (r < 0)
+			return r;
+		usbi_localize_device_descriptor(priv->descriptors);
+		fd = -1;
+		skip_fd = 1;
+#else
+		UNUSED(cpriv);
+#endif
+	} else {
+		fd = get_usbfs_fd(dev, O_RDONLY, 0);
 	}
-	if (fd < 0)
-		return fd;
+	if (!skip_fd) {
+		if (fd < 0)
+			return fd;
 
-	alloc_len = 0;
-	do {
-		const size_t desc_read_length = 256;
-		uint8_t *read_ptr;
+		alloc_len = 0;
+		do {
+			const size_t desc_read_length = 256;
+			uint8_t *read_ptr;
 
-		alloc_len += desc_read_length;
-		priv->descriptors = usbi_reallocf(priv->descriptors, alloc_len);
-		if (!priv->descriptors) {
-			if (fd != wrapped_fd)
-				close(fd);
-			return LIBUSB_ERROR_NO_MEM;
-		}
-		read_ptr = (uint8_t *)priv->descriptors + priv->descriptors_len;
-		/* usbfs has holes in the file */
-		if (!sysfs_dir)
-			memset(read_ptr, 0, desc_read_length);
-		nb = read(fd, read_ptr, desc_read_length);
-		if (nb < 0) {
-			usbi_err(ctx, "read descriptor failed, errno=%d", errno);
-			if (fd != wrapped_fd)
-				close(fd);
+			alloc_len += desc_read_length;
+			priv->descriptors = usbi_reallocf(priv->descriptors, alloc_len);
+			if (!priv->descriptors) {
+				if (fd != wrapped_fd)
+					close(fd);
+				return LIBUSB_ERROR_NO_MEM;
+			}
+			read_ptr = (uint8_t *)priv->descriptors + priv->descriptors_len;
+			/* usbfs has holes in the file */
+			if (!sysfs_dir)
+				memset(read_ptr, 0, desc_read_length);
+			nb = read(fd, read_ptr, desc_read_length);
+			if (nb < 0) {
+				usbi_err(ctx, "read descriptor failed, errno=%d", errno);
+				if (fd != wrapped_fd)
+					close(fd);
+				return LIBUSB_ERROR_IO;
+			}
+			priv->descriptors_len += (size_t)nb;
+		} while (priv->descriptors_len == alloc_len);
+
+		if (fd != wrapped_fd)
+			close(fd);
+
+		if (priv->descriptors_len < LIBUSB_DT_DEVICE_SIZE) {
+			usbi_err(ctx, "short descriptor read (%zu)", priv->descriptors_len);
 			return LIBUSB_ERROR_IO;
 		}
-		priv->descriptors_len += (size_t)nb;
-	} while (priv->descriptors_len == alloc_len);
-
-	if (fd != wrapped_fd)
-		close(fd);
-
-	if (priv->descriptors_len < LIBUSB_DT_DEVICE_SIZE) {
-		usbi_err(ctx, "short descriptor read (%zu)", priv->descriptors_len);
-		return LIBUSB_ERROR_IO;
 	}
 
 	r = parse_config_descriptors(dev);
@@ -1082,14 +1272,14 @@ retry:
 	usbi_mutex_unlock(&ctx->usb_devs_lock);
 
 	if (!dev->parent_dev && add_parent) {
-		usbi_dbg("parent_dev %s not enumerated yet, enumerating now",
+		usbi_dbg(ctx, "parent_dev %s not enumerated yet, enumerating now",
 			 parent_sysfs_dir);
 		sysfs_scan_device(ctx, parent_sysfs_dir);
 		add_parent = 0;
 		goto retry;
 	}
 
-	usbi_dbg("dev %p (%s) has parent %p (%s) port %u", dev, sysfs_dir,
+	usbi_dbg(ctx, "dev %p (%s) has parent %p (%s) port %u", dev, sysfs_dir,
 		 dev->parent_dev, parent_sysfs_dir, dev->port_number);
 
 	free(parent_sysfs_dir);
@@ -1108,17 +1298,17 @@ int linux_enumerate_device(struct libusb_context *ctx,
 	 * will be reused. instead we should add a simple sysfs attribute with
 	 * a session ID. */
 	session_id = busnum << 8 | devaddr;
-	usbi_dbg("busnum %u devaddr %u session_id %lu", busnum, devaddr, session_id);
+	usbi_dbg(ctx, "busnum %u devaddr %u session_id %lu", busnum, devaddr, session_id);
 
 	dev = usbi_get_device_by_session_id(ctx, session_id);
 	if (dev) {
 		/* device already exists in the context */
-		usbi_dbg("session_id %lu already exists", session_id);
+		usbi_dbg(ctx, "session_id %lu already exists", session_id);
 		libusb_unref_device(dev);
 		return LIBUSB_SUCCESS;
 	}
 
-	usbi_dbg("allocating new device for %u/%u (session %lu)",
+	usbi_dbg(ctx, "allocating new device for %u/%u (session %lu)",
 		 busnum, devaddr, session_id);
 	dev = usbi_alloc_device(ctx, session_id);
 	if (!dev)
@@ -1167,7 +1357,7 @@ void linux_device_disconnected(uint8_t busnum, uint8_t devaddr)
 			usbi_disconnect_device(dev);
 			libusb_unref_device(dev);
 		} else {
-			usbi_dbg("device not found for session %lx", session_id);
+			usbi_dbg(ctx, "device not found for session %lx", session_id);
 		}
 	}
 	usbi_mutex_static_unlock(&active_contexts_lock);
@@ -1199,7 +1389,7 @@ static int usbfs_scan_busdir(struct libusb_context *ctx, uint8_t busnum)
 	int r = LIBUSB_ERROR_IO;
 
 	sprintf(dirpath, USB_DEVTMPFS_PATH "/%03u", busnum);
-	usbi_dbg("%s", dirpath);
+	usbi_dbg(ctx, "%s", dirpath);
 	dir = opendir(dirpath);
 	if (!dir) {
 		usbi_err(ctx, "opendir '%s' failed, errno=%d", dirpath, errno);
@@ -1215,12 +1405,12 @@ static int usbfs_scan_busdir(struct libusb_context *ctx, uint8_t busnum)
 			continue;
 
 		if (!parse_u8(entry->d_name, &devaddr)) {
-			usbi_dbg("unknown dir entry %s", entry->d_name);
+			usbi_dbg(ctx, "unknown dir entry %s", entry->d_name);
 			continue;
 		}
 
 		if (linux_enumerate_device(ctx, busnum, devaddr, NULL)) {
-			usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
+			usbi_dbg(ctx, "failed to enumerate dir entry %s", entry->d_name);
 			continue;
 		}
 
@@ -1258,12 +1448,12 @@ static int usbfs_get_device_list(struct libusb_context *ctx)
 
 			r = linux_enumerate_device(ctx, busnum, devaddr, NULL);
 			if (r < 0) {
-				usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
+				usbi_dbg(ctx, "failed to enumerate dir entry %s", entry->d_name);
 				continue;
 			}
 		} else {
 			if (!parse_u8(entry->d_name, &busnum)) {
-				usbi_dbg("unknown dir entry %s", entry->d_name);
+				usbi_dbg(ctx, "unknown dir entry %s", entry->d_name);
 				continue;
 			}
 
@@ -1298,7 +1488,7 @@ static int sysfs_get_device_list(struct libusb_context *ctx)
 		num_devices++;
 
 		if (sysfs_scan_device(ctx, entry->d_name)) {
-			usbi_dbg("failed to enumerate dir entry %s", entry->d_name);
+			usbi_dbg(ctx, "failed to enumerate dir entry %s", entry->d_name);
 			continue;
 		}
 
@@ -1338,7 +1528,7 @@ static int initialize_handle(struct libusb_device_handle *handle, int fd)
 	r = ioctl(fd, IOCTL_USBFS_GET_CAPABILITIES, &hpriv->caps);
 	if (r < 0) {
 		if (errno == ENOTTY)
-			usbi_dbg("getcap not available");
+			usbi_dbg(HANDLE_CTX(handle), "getcap not available");
 		else
 			usbi_err(HANDLE_CTX(handle), "getcap failed, errno=%d", errno);
 		hpriv->caps = USBFS_CAP_BULK_CONTINUATION;
@@ -1372,7 +1562,7 @@ static int op_wrap_sys_device(struct libusb_context *ctx,
 
 	/* Session id is unused as we do not add the device to the list of
 	 * connected devices. */
-	usbi_dbg("allocating new device for fd %d", fd);
+	usbi_dbg(ctx, "allocating new device for fd %d", fd);
 	dev = usbi_alloc_device(ctx, 0);
 	if (!dev)
 		return LIBUSB_ERROR_NO_MEM;
@@ -1399,16 +1589,23 @@ out:
 
 static int op_open(struct libusb_device_handle *handle)
 {
-	int fd, r;
+	int fd = -1, r;
 
-	fd = get_usbfs_fd(handle->dev, O_RDWR, 0);
+#ifdef __ANDROID__
+	struct linux_device_priv *priv = usbi_get_device_priv(handle->dev);
+	if (priv->android_jni_device != NULL)
+		fd = get_android_jni_fd(handle);
+#endif
+
+	if (fd < 0)
+		fd = get_usbfs_fd(handle->dev, O_RDWR, 0);
 	if (fd < 0) {
 		if (fd == LIBUSB_ERROR_NO_DEVICE) {
 			/* device will still be marked as attached if hotplug monitor thread
 			 * hasn't processed remove event yet */
 			usbi_mutex_static_lock(&linux_hotplug_lock);
 			if (usbi_atomic_load(&handle->dev->attached)) {
-				usbi_dbg("open failed with no device, but device still attached");
+				usbi_dbg(HANDLE_CTX(handle), "open failed with no device, but device still attached");
 				linux_device_disconnected(handle->dev->bus_number,
 							  handle->dev->device_address);
 			}
@@ -1427,12 +1624,20 @@ static int op_open(struct libusb_device_handle *handle)
 static void op_close(struct libusb_device_handle *dev_handle)
 {
 	struct linux_device_handle_priv *hpriv = usbi_get_device_handle_priv(dev_handle);
+	struct libusb_context *ctx = HANDLE_CTX(dev_handle);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(ctx);
 
 	/* fd may have already been removed by POLLERR condition in op_handle_events() */
 	if (!hpriv->fd_removed)
-		usbi_remove_event_source(HANDLE_CTX(dev_handle), hpriv->fd);
+		usbi_remove_event_source(ctx, hpriv->fd);
 	if (!hpriv->fd_keep)
 		close(hpriv->fd);
+#ifdef __ANDROID__
+	if (hpriv->android_jni_connection != NULL)
+		android_jni_disconnect(cpriv->android_jni, hpriv->android_jni_connection);
+#else
+	UNUSED(cpriv);
+#endif
 }
 
 static int op_get_configuration(struct libusb_device_handle *handle,
@@ -1851,6 +2056,15 @@ static int op_release_interface(struct libusb_device_handle *handle, uint8_t int
 static void op_destroy_device(struct libusb_device *dev)
 {
 	struct linux_device_priv *priv = usbi_get_device_priv(dev);
+	struct linux_context_priv *cpriv = usbi_get_context_priv(DEVICE_CTX(dev));
+
+#ifdef __ANDROID__
+	if (priv->android_jni_device != NULL) {
+		android_jni_globalunref(cpriv->android_jni, priv->android_jni_device);
+	}
+#else
+	UNUSED(cpriv);
+#endif
 
 	free(priv->config_descriptors);
 	free(priv->descriptors);
@@ -1878,11 +2092,11 @@ static int discard_urbs(struct usbi_transfer *itransfer, int first, int last_plu
 			continue;
 
 		if (errno == EINVAL) {
-			usbi_dbg("URB not found --> assuming ready to be reaped");
+			usbi_dbg(TRANSFER_CTX(transfer), "URB not found --> assuming ready to be reaped");
 			if (i == (last_plus_one - 1))
 				ret = LIBUSB_ERROR_NOT_FOUND;
 		} else if (errno == ENODEV) {
-			usbi_dbg("Device not found for URB --> assuming ready to be reaped");
+			usbi_dbg(TRANSFER_CTX(transfer), "Device not found for URB --> assuming ready to be reaped");
 			ret = LIBUSB_ERROR_NO_DEVICE;
 		} else {
 			usbi_warn(TRANSFER_CTX(transfer), "unrecognised discard errno %d", errno);
@@ -1973,7 +2187,7 @@ static int submit_bulk_transfer(struct usbi_transfer *itransfer)
 		last_urb_partial = 1;
 		num_urbs++;
 	}
-	usbi_dbg("need %d urbs for new transfer with length %d", num_urbs, transfer->length);
+	usbi_dbg(TRANSFER_CTX(transfer), "need %d urbs for new transfer with length %d", num_urbs, transfer->length);
 	urbs = calloc(num_urbs, sizeof(*urbs));
 	if (!urbs)
 		return LIBUSB_ERROR_NO_MEM;
@@ -2038,7 +2252,7 @@ static int submit_bulk_transfer(struct usbi_transfer *itransfer)
 		/* if the first URB submission fails, we can simply free up and
 		 * return failure immediately. */
 		if (i == 0) {
-			usbi_dbg("first URB failed, easy peasy");
+			usbi_dbg(TRANSFER_CTX(transfer), "first URB failed, easy peasy");
 			free(urbs);
 			tpriv->urbs = NULL;
 			return r;
@@ -2072,7 +2286,7 @@ static int submit_bulk_transfer(struct usbi_transfer *itransfer)
 
 		discard_urbs(itransfer, 0, i);
 
-		usbi_dbg("reporting successful submission but waiting for %d "
+		usbi_dbg(TRANSFER_CTX(transfer), "reporting successful submission but waiting for %d "
 			 "discards before reporting error", i);
 		return 0;
 	}
@@ -2123,7 +2337,7 @@ static int submit_iso_transfer(struct usbi_transfer *itransfer)
 	/* usbfs limits the number of iso packets per URB */
 	num_urbs = (num_packets + (MAX_ISO_PACKETS_PER_URB - 1)) / MAX_ISO_PACKETS_PER_URB;
 
-	usbi_dbg("need %d urbs for new transfer with length %d", num_urbs, transfer->length);
+	usbi_dbg(TRANSFER_CTX(transfer), "need %d urbs for new transfer with length %d", num_urbs, transfer->length);
 
 	urbs = calloc(num_urbs, sizeof(*urbs));
 	if (!urbs)
@@ -2194,7 +2408,7 @@ static int submit_iso_transfer(struct usbi_transfer *itransfer)
 		/* if the first URB submission fails, we can simply free up and
 		 * return failure immediately. */
 		if (i == 0) {
-			usbi_dbg("first URB failed, easy peasy");
+			usbi_dbg(TRANSFER_CTX(transfer), "first URB failed, easy peasy");
 			free_iso_urbs(tpriv);
 			return r;
 		}
@@ -2219,7 +2433,7 @@ static int submit_iso_transfer(struct usbi_transfer *itransfer)
 		tpriv->num_retired = num_urbs - i;
 		discard_urbs(itransfer, 0, i);
 
-		usbi_dbg("reporting successful submission but waiting for %d "
+		usbi_dbg(TRANSFER_CTX(transfer), "reporting successful submission but waiting for %d "
 			 "discards before reporting error", i);
 		return 0;
 	}
@@ -2349,14 +2563,14 @@ static int handle_bulk_completion(struct usbi_transfer *itransfer,
 	int urb_idx = urb - tpriv->urbs;
 
 	usbi_mutex_lock(&itransfer->lock);
-	usbi_dbg("handling completion status %d of bulk urb %d/%d", urb->status,
+	usbi_dbg(TRANSFER_CTX(transfer), "handling completion status %d of bulk urb %d/%d", urb->status,
 		 urb_idx + 1, tpriv->num_urbs);
 
 	tpriv->num_retired++;
 
 	if (tpriv->reap_action != NORMAL) {
 		/* cancelled, submit_fail, or completed early */
-		usbi_dbg("abnormal reap: urb status %d", urb->status);
+		usbi_dbg(TRANSFER_CTX(transfer), "abnormal reap: urb status %d", urb->status);
 
 		/* even though we're in the process of cancelling, it's possible that
 		 * we may receive some data in these URBs that we don't want to lose.
@@ -2377,9 +2591,9 @@ static int handle_bulk_completion(struct usbi_transfer *itransfer,
 		if (urb->actual_length > 0) {
 			unsigned char *target = transfer->buffer + itransfer->transferred;
 
-			usbi_dbg("received %d bytes of surplus data", urb->actual_length);
+			usbi_dbg(TRANSFER_CTX(transfer), "received %d bytes of surplus data", urb->actual_length);
 			if (urb->buffer != target) {
-				usbi_dbg("moving surplus data from offset %zu to offset %zu",
+				usbi_dbg(TRANSFER_CTX(transfer), "moving surplus data from offset %zu to offset %zu",
 					 (unsigned char *)urb->buffer - transfer->buffer,
 					 target - transfer->buffer);
 				memmove(target, urb->buffer, urb->actual_length);
@@ -2388,7 +2602,7 @@ static int handle_bulk_completion(struct usbi_transfer *itransfer,
 		}
 
 		if (tpriv->num_retired == tpriv->num_urbs) {
-			usbi_dbg("abnormal reap: last URB handled, reporting");
+			usbi_dbg(TRANSFER_CTX(transfer), "abnormal reap: last URB handled, reporting");
 			if (tpriv->reap_action != COMPLETED_EARLY &&
 			    tpriv->reap_status == LIBUSB_TRANSFER_COMPLETED)
 				tpriv->reap_status = LIBUSB_TRANSFER_ERROR;
@@ -2412,17 +2626,17 @@ static int handle_bulk_completion(struct usbi_transfer *itransfer,
 		break;
 	case -ENODEV:
 	case -ESHUTDOWN:
-		usbi_dbg("device removed");
+		usbi_dbg(TRANSFER_CTX(transfer), "device removed");
 		tpriv->reap_status = LIBUSB_TRANSFER_NO_DEVICE;
 		goto cancel_remaining;
 	case -EPIPE:
-		usbi_dbg("detected endpoint stall");
+		usbi_dbg(TRANSFER_CTX(transfer), "detected endpoint stall");
 		if (tpriv->reap_status == LIBUSB_TRANSFER_COMPLETED)
 			tpriv->reap_status = LIBUSB_TRANSFER_STALL;
 		goto cancel_remaining;
 	case -EOVERFLOW:
 		/* overflow can only ever occur in the last urb */
-		usbi_dbg("overflow, actual_length=%d", urb->actual_length);
+		usbi_dbg(TRANSFER_CTX(transfer), "overflow, actual_length=%d", urb->actual_length);
 		if (tpriv->reap_status == LIBUSB_TRANSFER_COMPLETED)
 			tpriv->reap_status = LIBUSB_TRANSFER_OVERFLOW;
 		goto completed;
@@ -2431,7 +2645,7 @@ static int handle_bulk_completion(struct usbi_transfer *itransfer,
 	case -EILSEQ:
 	case -ECOMM:
 	case -ENOSR:
-		usbi_dbg("low-level bus error %d", urb->status);
+		usbi_dbg(TRANSFER_CTX(transfer), "low-level bus error %d", urb->status);
 		tpriv->reap_action = ERROR;
 		goto cancel_remaining;
 	default:
@@ -2443,10 +2657,10 @@ static int handle_bulk_completion(struct usbi_transfer *itransfer,
 	/* if we've reaped all urbs or we got less data than requested then we're
 	 * done */
 	if (tpriv->num_retired == tpriv->num_urbs) {
-		usbi_dbg("all URBs in transfer reaped --> complete!");
+		usbi_dbg(TRANSFER_CTX(transfer), "all URBs in transfer reaped --> complete!");
 		goto completed;
 	} else if (urb->actual_length < urb->buffer_length) {
-		usbi_dbg("short transfer %d/%d --> complete!",
+		usbi_dbg(TRANSFER_CTX(transfer), "short transfer %d/%d --> complete!",
 			 urb->actual_length, urb->buffer_length);
 		if (tpriv->reap_action == NORMAL)
 			tpriv->reap_action = COMPLETED_EARLY;
@@ -2502,7 +2716,7 @@ static int handle_iso_completion(struct usbi_transfer *itransfer,
 		return LIBUSB_ERROR_NOT_FOUND;
 	}
 
-	usbi_dbg("handling completion status %d of iso urb %d/%d", urb->status,
+	usbi_dbg(TRANSFER_CTX(transfer), "handling completion status %d of iso urb %d/%d", urb->status,
 		 urb_idx, num_urbs);
 
 	/* copy isochronous results back in */
@@ -2521,15 +2735,15 @@ static int handle_iso_completion(struct usbi_transfer *itransfer,
 			break;
 		case -ENODEV:
 		case -ESHUTDOWN:
-			usbi_dbg("packet %d - device removed", i);
+			usbi_dbg(TRANSFER_CTX(transfer), "packet %d - device removed", i);
 			lib_desc->status = LIBUSB_TRANSFER_NO_DEVICE;
 			break;
 		case -EPIPE:
-			usbi_dbg("packet %d - detected endpoint stall", i);
+			usbi_dbg(TRANSFER_CTX(transfer), "packet %d - detected endpoint stall", i);
 			lib_desc->status = LIBUSB_TRANSFER_STALL;
 			break;
 		case -EOVERFLOW:
-			usbi_dbg("packet %d - overflow error", i);
+			usbi_dbg(TRANSFER_CTX(transfer), "packet %d - overflow error", i);
 			lib_desc->status = LIBUSB_TRANSFER_OVERFLOW;
 			break;
 		case -ETIME:
@@ -2538,7 +2752,7 @@ static int handle_iso_completion(struct usbi_transfer *itransfer,
 		case -ECOMM:
 		case -ENOSR:
 		case -EXDEV:
-			usbi_dbg("packet %d - low-level USB error %d", i, urb_desc->status);
+			usbi_dbg(TRANSFER_CTX(transfer), "packet %d - low-level USB error %d", i, urb_desc->status);
 			lib_desc->status = LIBUSB_TRANSFER_ERROR;
 			break;
 		default:
@@ -2553,10 +2767,10 @@ static int handle_iso_completion(struct usbi_transfer *itransfer,
 	tpriv->num_retired++;
 
 	if (tpriv->reap_action != NORMAL) { /* cancelled or submit_fail */
-		usbi_dbg("CANCEL: urb status %d", urb->status);
+		usbi_dbg(TRANSFER_CTX(transfer), "CANCEL: urb status %d", urb->status);
 
 		if (tpriv->num_retired == num_urbs) {
-			usbi_dbg("CANCEL: last URB handled, reporting");
+			usbi_dbg(TRANSFER_CTX(transfer), "CANCEL: last URB handled, reporting");
 			free_iso_urbs(tpriv);
 			if (tpriv->reap_action == CANCELLED) {
 				usbi_mutex_unlock(&itransfer->lock);
@@ -2576,7 +2790,7 @@ static int handle_iso_completion(struct usbi_transfer *itransfer,
 	case -ECONNRESET:
 		break;
 	case -ESHUTDOWN:
-		usbi_dbg("device removed");
+		usbi_dbg(TRANSFER_CTX(transfer), "device removed");
 		status = LIBUSB_TRANSFER_NO_DEVICE;
 		break;
 	default:
@@ -2587,7 +2801,7 @@ static int handle_iso_completion(struct usbi_transfer *itransfer,
 
 	/* if we've reaped all urbs then we're done */
 	if (tpriv->num_retired == num_urbs) {
-		usbi_dbg("all URBs in transfer reaped --> complete!");
+		usbi_dbg(TRANSFER_CTX(transfer), "all URBs in transfer reaped --> complete!");
 		free_iso_urbs(tpriv);
 		usbi_mutex_unlock(&itransfer->lock);
 		return usbi_handle_transfer_completion(itransfer, status);
@@ -2605,7 +2819,7 @@ static int handle_control_completion(struct usbi_transfer *itransfer,
 	int status;
 
 	usbi_mutex_lock(&itransfer->lock);
-	usbi_dbg("handling completion status %d", urb->status);
+	usbi_dbg(ITRANSFER_CTX(itransfer), "handling completion status %d", urb->status);
 
 	itransfer->transferred += urb->actual_length;
 
@@ -2628,15 +2842,15 @@ static int handle_control_completion(struct usbi_transfer *itransfer,
 		break;
 	case -ENODEV:
 	case -ESHUTDOWN:
-		usbi_dbg("device removed");
+		usbi_dbg(ITRANSFER_CTX(itransfer), "device removed");
 		status = LIBUSB_TRANSFER_NO_DEVICE;
 		break;
 	case -EPIPE:
-		usbi_dbg("unsupported control request");
+		usbi_dbg(ITRANSFER_CTX(itransfer), "unsupported control request");
 		status = LIBUSB_TRANSFER_STALL;
 		break;
 	case -EOVERFLOW:
-		usbi_dbg("overflow, actual_length=%d", urb->actual_length);
+		usbi_dbg(ITRANSFER_CTX(itransfer), "overflow, actual_length=%d", urb->actual_length);
 		status = LIBUSB_TRANSFER_OVERFLOW;
 		break;
 	case -ETIME:
@@ -2644,7 +2858,7 @@ static int handle_control_completion(struct usbi_transfer *itransfer,
 	case -EILSEQ:
 	case -ECOMM:
 	case -ENOSR:
-		usbi_dbg("low-level bus error %d", urb->status);
+		usbi_dbg(ITRANSFER_CTX(itransfer), "low-level bus error %d", urb->status);
 		status = LIBUSB_TRANSFER_ERROR;
 		break;
 	default:
@@ -2681,7 +2895,7 @@ static int reap_for_handle(struct libusb_device_handle *handle)
 	itransfer = urb->usercontext;
 	transfer = USBI_TRANSFER_TO_LIBUSB_TRANSFER(itransfer);
 
-	usbi_dbg("urb type=%u status=%d transferred=%d", urb->type, urb->status, urb->actual_length);
+	usbi_dbg(HANDLE_CTX(handle), "urb type=%u status=%d transferred=%d", urb->type, urb->status, urb->actual_length);
 
 	switch (transfer->type) {
 	case LIBUSB_TRANSFER_TYPE_ISOCHRONOUS:
@@ -2811,6 +3025,7 @@ const struct usbi_os_backend usbi_backend = {
 
 	.handle_events = op_handle_events,
 
+	.context_priv_size = sizeof(struct linux_context_priv),
 	.device_priv_size = sizeof(struct linux_device_priv),
 	.device_handle_priv_size = sizeof(struct linux_device_handle_priv),
 	.transfer_priv_size = sizeof(struct linux_transfer_priv),
