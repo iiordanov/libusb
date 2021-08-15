@@ -84,7 +84,7 @@ if(WIN32)
     target_link_libraries(usb-1.0 PRIVATE windowsapp)
 endif()
 
-if(UNIX)
+if(UNIX AND NOT ANDROID)
     target_sources(usb-1.0 PRIVATE 
         ${libusb_ROOT}/os/events_posix.c
         ${libusb_ROOT}/os/threads_posix.c
@@ -96,8 +96,12 @@ if(UNIX)
 endif()
 
 if(ANDROID)
-    target_sources(usb-1.0 PRIVATE 
+    target_sources(usb-1.0 PRIVATE
+        ${libusb_ROOT}/os/events_posix.c
+        ${libusb_ROOT}/os/threads_posix.c
+        ${libusb_ROOT}/os/linux_usbfs.c
         ${libusb_ROOT}/os/linux_netlink.c
+        ${libusb_ROOT}/os/linux_android_jni.c
     )
     target_include_directories(usb-1.0 PUBLIC android)
     
