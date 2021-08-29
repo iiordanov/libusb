@@ -210,7 +210,7 @@ int android_jni_free(struct android_jni_context *jni)
 {
 	int r;
 	JNIEnv *jni_env;
-
+	pthread_key_delete(jni->detach_pthread_key);
 	r = android_jni_env(jni, &jni_env);
 	if (r != LIBUSB_SUCCESS) {
 		free(jni);
