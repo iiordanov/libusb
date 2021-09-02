@@ -210,11 +210,11 @@ int android_jni_free(struct android_jni_context *jni)
 {
 	int r;
 	JNIEnv *jni_env;
-	pthread_key_delete(jni->detach_pthread_key);
+	JavaVM *javavm = jni->javavm;
+
 	r = android_jni_env(jni, &jni_env);
 	if (r != LIBUSB_SUCCESS) {
-		free(jni);
-		return r;
+		goto out;
 	}
 
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->Intent);
@@ -227,6 +227,12 @@ int android_jni_free(struct android_jni_context *jni)
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->usb_manager);
 
 	(*jni_env)->DeleteGlobalRef(jni_env, jni->permission_action);
+
+out:
+	if (pthread_getspecific(jni->detach_pthread_key) == javavm) {
+		(*javavm)->DetachCurrentThread(javavm);
+	}
+	pthread_key_delete(jni->detach_pthread_key);
 
 	free(jni);
 	return LIBUSB_SUCCESS;
