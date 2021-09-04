@@ -235,7 +235,7 @@ out:
 	pthread_key_delete(jni->detach_pthread_key);
 
 	free(jni);
-	return LIBUSB_SUCCESS;
+	return r;
 }
 
 int android_jni_detect_usbhost(struct android_jni_context *jni, int *has_usbhost)
