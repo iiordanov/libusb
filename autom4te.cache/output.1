@@ -657,6 +657,8 @@ OS_NULL_FALSE
 OS_NULL_TRUE
 OS_NETBSD_FALSE
 OS_NETBSD_TRUE
+OS_ANDROID_FALSE
+OS_ANDROID_TRUE
 OS_LINUX_FALSE
 OS_LINUX_TRUE
 OS_HAIKU_FALSE
@@ -17125,6 +17127,14 @@ else
   OS_LINUX_FALSE=
 fi
 
+ if test "x$is_android_linux" != xyes; then
+  OS_ANDROID_TRUE=
+  OS_ANDROID_FALSE='#'
+else
+  OS_ANDROID_TRUE='#'
+  OS_ANDROID_FALSE=
+fi
+
  if test "x$backend" = xnetbsd; then
   OS_NETBSD_TRUE=
   OS_NETBSD_FALSE='#'
@@ -17400,6 +17410,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${OS_LINUX_TRUE}" && test -z "${OS_LINUX_FALSE}"; then
   as_fn_error $? "conditional \"OS_LINUX\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${OS_ANDROID_TRUE}" && test -z "${OS_ANDROID_FALSE}"; then
+  as_fn_error $? "conditional \"OS_ANDROID\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${OS_NETBSD_TRUE}" && test -z "${OS_NETBSD_FALSE}"; then
