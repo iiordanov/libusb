@@ -47,7 +47,7 @@ OS_SRC = $(OS_ANDROID_SRC)
 endif
 
 if OS_LINUX
-OS_SRC = $(OS_LINUX_SRC)
+OS_SRC = $(OS_ANDROID_SRC)
 if USE_UDEV
 OS_SRC += os/linux_udev.c
 else

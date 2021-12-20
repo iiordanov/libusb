@@ -561,7 +561,7 @@ configure:11969: $? = 0
 configure:11970: result: yes
 configure:11980: checking for library containing pthread_create
 configure:12011: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/cco7K8FB.o: in function `main':
+/usr/bin/ld: /tmp/ccW1ZRki.o: in function `main':
 /home/iordan/software/libusb/libusb-mine/conftest.c:40: undefined reference to `pthread_create'
 collect2: error: ld returned 1 exit status
 configure:12011: $? = 1
@@ -734,6 +734,7 @@ config.status:1259: creating config.h
 config.status:1440: config.h is unchanged
 config.status:1488: executing depfiles commands
 config.status:1565: cd libusb       && sed -e '/# am--include-marker/d' Makefile         | make -f - am--depfiles
+make: Nothing to be done for 'am--depfiles'.
 config.status:1570: $? = 0
 config.status:1565: cd examples       && sed -e '/# am--include-marker/d' Makefile         | make -f - am--depfiles
 make: Nothing to be done for 'am--depfiles'.
