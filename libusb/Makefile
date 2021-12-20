@@ -139,40 +139,44 @@ am__libusb_1_0_la_SOURCES_DIST = libusbi.h version.h version_nano.h \
 	core.c descriptor.c hotplug.c io.c strerror.c sync.c \
 	os/events_windows.h os/events_windows.c os/threads_windows.h \
 	os/threads_windows.c os/events_posix.h os/events_posix.c \
-	os/threads_posix.h os/threads_posix.c os/darwin_usb.h \
-	os/darwin_usb.c os/linux_udev.c os/linux_netlink.c \
-	os/linux_usbfs.h os/linux_usbfs.c os/netbsd_usb.c \
-	os/null_usb.c os/openbsd_usb.c os/sunos_usb.h os/sunos_usb.c \
-	libusb-1.0.def libusb-1.0.rc os/windows_common.h \
-	os/windows_common.c os/windows_usbdk.h os/windows_usbdk.c \
-	os/windows_winusb.h os/windows_winusb.c
+	os/threads_posix.h os/threads_posix.c os/linux_usbfs.h \
+	os/linux_usbfs.c os/linux_android_jni.h os/linux_android_jni.c \
+	os/linux_udev.c os/linux_netlink.c os/darwin_usb.h \
+	os/darwin_usb.c os/netbsd_usb.c os/null_usb.c os/openbsd_usb.c \
+	os/sunos_usb.h os/sunos_usb.c libusb-1.0.def libusb-1.0.rc \
+	os/windows_common.h os/windows_common.c os/windows_usbdk.h \
+	os/windows_usbdk.c os/windows_winusb.h os/windows_winusb.c
 am__dirstamp = $(am__leading_dot)dirstamp
 am__objects_1 = os/events_windows.lo os/threads_windows.lo
 am__objects_2 = os/events_posix.lo os/threads_posix.lo
 #am__objects_3 = $(am__objects_1)
 am__objects_3 = $(am__objects_2)
-am__objects_4 = os/darwin_usb.lo
+am__objects_4 = os/linux_usbfs.lo os/linux_android_jni.lo
 am__objects_5 = os/linux_udev.lo
 #am__objects_6 = os/linux_netlink.lo
-am__objects_7 = os/linux_usbfs.lo
-am__objects_8 = os/netbsd_usb.lo
-am__objects_9 = os/null_usb.lo
-am__objects_10 = os/openbsd_usb.lo
-am__objects_11 = os/sunos_usb.lo
-am__objects_12 = libusb-1.0.lo os/windows_common.lo \
+am__objects_7 = os/darwin_usb.lo
+am__objects_8 = os/linux_usbfs.lo
+am__objects_9 = os/netbsd_usb.lo
+am__objects_10 = os/null_usb.lo
+am__objects_11 = os/openbsd_usb.lo
+am__objects_12 = os/sunos_usb.lo
+am__objects_13 = libusb-1.0.lo os/windows_common.lo \
 	os/windows_usbdk.lo os/windows_winusb.lo
-##am__objects_13 = $(am__objects_12)
-##am__objects_13 = $(am__objects_11)
-##am__objects_13 = $(am__objects_10)
-##am__objects_13 = $(am__objects_9)
-##am__objects_13 = $(am__objects_8)
-am__objects_13 = $(am__objects_7) \
-	$(am__objects_5) \
-	$(am__objects_6)
-#am__objects_13 = $(am__objects_4) $(am__objects_5) \
+###am__objects_14 = $(am__objects_13)
+###am__objects_14 = $(am__objects_12)
+###am__objects_14 = $(am__objects_11)
+###am__objects_14 = $(am__objects_10)
+###am__objects_14 = $(am__objects_9)
+#am__objects_14 = $(am__objects_8) \
+#	$(am__objects_5) \
 #	$(am__objects_6)
+##am__objects_14 = $(am__objects_7) \
+##	$(am__objects_5) \
+##	$(am__objects_6)
+am__objects_14 = $(am__objects_4) $(am__objects_5) \
+	$(am__objects_6)
 am_libusb_1_0_la_OBJECTS = core.lo descriptor.lo hotplug.lo io.lo \
-	strerror.lo sync.lo $(am__objects_3) $(am__objects_13)
+	strerror.lo sync.lo $(am__objects_3) $(am__objects_14)
 libusb_1_0_la_OBJECTS = $(am_libusb_1_0_la_OBJECTS)
 AM_V_lt = $(am__v_lt_$(V))
 am__v_lt_ = $(am__v_lt_$(AM_DEFAULT_VERBOSITY))
@@ -185,9 +189,9 @@ libusb_haiku_la_LIBADD =
 am__libusb_haiku_la_SOURCES_DIST = os/haiku_usb.h \
 	os/haiku_usb_backend.cpp os/haiku_pollfs.cpp \
 	os/haiku_usb_raw.h os/haiku_usb_raw.cpp
-am__objects_14 = os/haiku_usb_backend.lo os/haiku_pollfs.lo \
+am__objects_15 = os/haiku_usb_backend.lo os/haiku_pollfs.lo \
 	os/haiku_usb_raw.lo
-#am_libusb_haiku_la_OBJECTS = $(am__objects_14)
+#am_libusb_haiku_la_OBJECTS = $(am__objects_15)
 libusb_haiku_la_OBJECTS = $(am_libusb_haiku_la_OBJECTS)
 #am_libusb_haiku_la_rpath =
 AM_V_P = $(am__v_P_$(V))
@@ -211,11 +215,12 @@ am__depfiles_remade = ./$(DEPDIR)/core.Plo ./$(DEPDIR)/descriptor.Plo \
 	os/$(DEPDIR)/darwin_usb.Plo os/$(DEPDIR)/events_posix.Plo \
 	os/$(DEPDIR)/events_windows.Plo os/$(DEPDIR)/haiku_pollfs.Plo \
 	os/$(DEPDIR)/haiku_usb_backend.Plo \
-	os/$(DEPDIR)/haiku_usb_raw.Plo os/$(DEPDIR)/linux_netlink.Plo \
-	os/$(DEPDIR)/linux_udev.Plo os/$(DEPDIR)/linux_usbfs.Plo \
-	os/$(DEPDIR)/netbsd_usb.Plo os/$(DEPDIR)/null_usb.Plo \
-	os/$(DEPDIR)/openbsd_usb.Plo os/$(DEPDIR)/sunos_usb.Plo \
-	os/$(DEPDIR)/threads_posix.Plo \
+	os/$(DEPDIR)/haiku_usb_raw.Plo \
+	os/$(DEPDIR)/linux_android_jni.Plo \
+	os/$(DEPDIR)/linux_netlink.Plo os/$(DEPDIR)/linux_udev.Plo \
+	os/$(DEPDIR)/linux_usbfs.Plo os/$(DEPDIR)/netbsd_usb.Plo \
+	os/$(DEPDIR)/null_usb.Plo os/$(DEPDIR)/openbsd_usb.Plo \
+	os/$(DEPDIR)/sunos_usb.Plo os/$(DEPDIR)/threads_posix.Plo \
 	os/$(DEPDIR)/threads_windows.Plo \
 	os/$(DEPDIR)/windows_common.Plo os/$(DEPDIR)/windows_usbdk.Plo \
 	os/$(DEPDIR)/windows_winusb.Plo
@@ -431,6 +436,9 @@ OS_HAIKU_SRC = os/haiku_usb.h os/haiku_usb_backend.cpp \
 	       os/haiku_pollfs.cpp os/haiku_usb_raw.h os/haiku_usb_raw.cpp
 
 OS_LINUX_SRC = os/linux_usbfs.h os/linux_usbfs.c
+OS_ANDROID_SRC = os/linux_usbfs.h os/linux_usbfs.c \
+                 os/linux_android_jni.h os/linux_android_jni.c
+
 OS_NETBSD_SRC = os/netbsd_usb.c
 OS_NULL_SRC = os/null_usb.c
 OS_OPENBSD_SRC = os/openbsd_usb.c
@@ -440,6 +448,8 @@ OS_WINDOWS_SRC = libusb-1.0.def libusb-1.0.rc \
 		 os/windows_usbdk.h os/windows_usbdk.c \
 		 os/windows_winusb.h os/windows_winusb.c
 
+OS_SRC = $(OS_ANDROID_SRC) $(am__append_1) \
+	$(am__append_2)
 #OS_SRC = $(OS_DARWIN_SRC) $(am__append_1) \
 #	$(am__append_2)
 OS_SRC = $(OS_LINUX_SRC) $(am__append_1) \
@@ -568,10 +578,12 @@ os/events_windows.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
 os/threads_windows.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
 os/events_posix.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
 os/threads_posix.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
-os/darwin_usb.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
+os/linux_usbfs.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
+os/linux_android_jni.lo: os/$(am__dirstamp) \
+	os/$(DEPDIR)/$(am__dirstamp)
 os/linux_udev.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
 os/linux_netlink.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
-os/linux_usbfs.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
+os/darwin_usb.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
 os/netbsd_usb.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
 os/null_usb.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
 os/openbsd_usb.lo: os/$(am__dirstamp) os/$(DEPDIR)/$(am__dirstamp)
@@ -610,6 +622,7 @@ include os/$(DEPDIR)/events_windows.Plo # am--include-marker
 include os/$(DEPDIR)/haiku_pollfs.Plo # am--include-marker
 include os/$(DEPDIR)/haiku_usb_backend.Plo # am--include-marker
 include os/$(DEPDIR)/haiku_usb_raw.Plo # am--include-marker
+include os/$(DEPDIR)/linux_android_jni.Plo # am--include-marker
 include os/$(DEPDIR)/linux_netlink.Plo # am--include-marker
 include os/$(DEPDIR)/linux_udev.Plo # am--include-marker
 include os/$(DEPDIR)/linux_usbfs.Plo # am--include-marker
@@ -849,6 +862,7 @@ distclean: distclean-am
 	-rm -f os/$(DEPDIR)/haiku_pollfs.Plo
 	-rm -f os/$(DEPDIR)/haiku_usb_backend.Plo
 	-rm -f os/$(DEPDIR)/haiku_usb_raw.Plo
+	-rm -f os/$(DEPDIR)/linux_android_jni.Plo
 	-rm -f os/$(DEPDIR)/linux_netlink.Plo
 	-rm -f os/$(DEPDIR)/linux_udev.Plo
 	-rm -f os/$(DEPDIR)/linux_usbfs.Plo
@@ -918,6 +932,7 @@ maintainer-clean: maintainer-clean-am
 	-rm -f os/$(DEPDIR)/haiku_pollfs.Plo
 	-rm -f os/$(DEPDIR)/haiku_usb_backend.Plo
 	-rm -f os/$(DEPDIR)/haiku_usb_raw.Plo
+	-rm -f os/$(DEPDIR)/linux_android_jni.Plo
 	-rm -f os/$(DEPDIR)/linux_netlink.Plo
 	-rm -f os/$(DEPDIR)/linux_udev.Plo
 	-rm -f os/$(DEPDIR)/linux_usbfs.Plo

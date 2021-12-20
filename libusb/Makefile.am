@@ -20,6 +20,8 @@ OS_DARWIN_SRC = os/darwin_usb.h os/darwin_usb.c
 OS_HAIKU_SRC = os/haiku_usb.h os/haiku_usb_backend.cpp \
 	       os/haiku_pollfs.cpp os/haiku_usb_raw.h os/haiku_usb_raw.cpp
 OS_LINUX_SRC = os/linux_usbfs.h os/linux_usbfs.c
+OS_ANDROID_SRC = os/linux_usbfs.h os/linux_usbfs.c \
+                 os/linux_android_jni.h os/linux_android_jni.c
 OS_NETBSD_SRC = os/netbsd_usb.c
 OS_NULL_SRC = os/null_usb.c
 OS_OPENBSD_SRC = os/openbsd_usb.c
@@ -37,6 +39,10 @@ if OS_HAIKU
 noinst_LTLIBRARIES = libusb_haiku.la
 libusb_haiku_la_SOURCES = $(OS_HAIKU_SRC)
 libusb_1_0_la_LIBADD = libusb_haiku.la
+endif
+
+if OS_ANDROID
+OS_SRC = $(OS_ANDROID_SRC)
 endif
 
 if OS_LINUX
