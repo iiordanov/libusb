@@ -155,28 +155,27 @@ am__objects_4 = os/linux_usbfs.lo os/linux_android_jni.lo
 am__objects_5 = os/linux_udev.lo
 #am__objects_6 = os/linux_netlink.lo
 am__objects_7 = os/darwin_usb.lo
-am__objects_8 = os/linux_usbfs.lo
-am__objects_9 = os/netbsd_usb.lo
-am__objects_10 = os/null_usb.lo
-am__objects_11 = os/openbsd_usb.lo
-am__objects_12 = os/sunos_usb.lo
-am__objects_13 = libusb-1.0.lo os/windows_common.lo \
+am__objects_8 = os/netbsd_usb.lo
+am__objects_9 = os/null_usb.lo
+am__objects_10 = os/openbsd_usb.lo
+am__objects_11 = os/sunos_usb.lo
+am__objects_12 = libusb-1.0.lo os/windows_common.lo \
 	os/windows_usbdk.lo os/windows_winusb.lo
-###am__objects_14 = $(am__objects_13)
-###am__objects_14 = $(am__objects_12)
-###am__objects_14 = $(am__objects_11)
-###am__objects_14 = $(am__objects_10)
-###am__objects_14 = $(am__objects_9)
-#am__objects_14 = $(am__objects_8) \
+###am__objects_13 = $(am__objects_12)
+###am__objects_13 = $(am__objects_11)
+###am__objects_13 = $(am__objects_10)
+###am__objects_13 = $(am__objects_9)
+###am__objects_13 = $(am__objects_8)
+#am__objects_13 = $(am__objects_4) \
 #	$(am__objects_5) \
 #	$(am__objects_6)
-##am__objects_14 = $(am__objects_7) \
+##am__objects_13 = $(am__objects_7) \
 ##	$(am__objects_5) \
 ##	$(am__objects_6)
-am__objects_14 = $(am__objects_4) $(am__objects_5) \
+am__objects_13 = $(am__objects_4) $(am__objects_5) \
 	$(am__objects_6)
 am_libusb_1_0_la_OBJECTS = core.lo descriptor.lo hotplug.lo io.lo \
-	strerror.lo sync.lo $(am__objects_3) $(am__objects_14)
+	strerror.lo sync.lo $(am__objects_3) $(am__objects_13)
 libusb_1_0_la_OBJECTS = $(am_libusb_1_0_la_OBJECTS)
 AM_V_lt = $(am__v_lt_$(V))
 am__v_lt_ = $(am__v_lt_$(AM_DEFAULT_VERBOSITY))
@@ -189,9 +188,9 @@ libusb_haiku_la_LIBADD =
 am__libusb_haiku_la_SOURCES_DIST = os/haiku_usb.h \
 	os/haiku_usb_backend.cpp os/haiku_pollfs.cpp \
 	os/haiku_usb_raw.h os/haiku_usb_raw.cpp
-am__objects_15 = os/haiku_usb_backend.lo os/haiku_pollfs.lo \
+am__objects_14 = os/haiku_usb_backend.lo os/haiku_pollfs.lo \
 	os/haiku_usb_raw.lo
-#am_libusb_haiku_la_OBJECTS = $(am__objects_15)
+#am_libusb_haiku_la_OBJECTS = $(am__objects_14)
 libusb_haiku_la_OBJECTS = $(am_libusb_haiku_la_OBJECTS)
 #am_libusb_haiku_la_rpath =
 AM_V_P = $(am__v_P_$(V))
@@ -452,7 +451,7 @@ OS_SRC = $(OS_ANDROID_SRC) $(am__append_1) \
 	$(am__append_2)
 #OS_SRC = $(OS_DARWIN_SRC) $(am__append_1) \
 #	$(am__append_2)
-OS_SRC = $(OS_LINUX_SRC) $(am__append_1) \
+OS_SRC = $(OS_ANDROID_SRC) $(am__append_1) \
 	$(am__append_2)
 #OS_SRC = $(OS_NETBSD_SRC)
 #OS_SRC = $(OS_NULL_SRC)
