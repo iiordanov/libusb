@@ -90,6 +90,7 @@ static int set_fd_cloexec_nb(int fd, int socktype)
 	return 0;
 }
 
+#ifndef __ANDROID__
 int linux_netlink_start_event_monitor(void)
 {
 	struct sockaddr_nl sa_nl = { .nl_family = AF_NETLINK, .nl_groups = NL_GROUP_KERNEL };
@@ -170,6 +171,7 @@ int linux_netlink_stop_event_monitor(void)
 
 	return LIBUSB_SUCCESS;
 }
+#endif
 
 static const char *netlink_message_parse(const char *buffer, size_t len, const char *key)
 {
@@ -389,6 +391,7 @@ static void *linux_netlink_event_thread_main(void *arg)
 	return NULL;
 }
 
+#ifndef __ANDROID__
 void linux_netlink_hotplug_poll(void)
 {
 	int r;
@@ -399,3 +402,4 @@ void linux_netlink_hotplug_poll(void)
 	} while (r == 0);
 	usbi_mutex_static_unlock(&linux_hotplug_lock);
 }
+#endif

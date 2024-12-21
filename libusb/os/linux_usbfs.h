@@ -169,7 +169,7 @@ int linux_netlink_start_event_monitor(void);
 int linux_netlink_stop_event_monitor(void);
 void linux_netlink_hotplug_poll(void);
 #elif defined(__ANDROID__)
-void android_jni_hotplug_poll();
+void android_jni_hotplug_poll(void);
 #endif
 
 static inline int linux_start_event_monitor(void)
