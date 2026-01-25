@@ -18889,10 +18889,42 @@ is_android_linux=
 printf %s "checking operating system... " >&6; }
 case $host in
 *-darwin*)
-	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: Darwin/Mac OS X" >&5
+		cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+		#include <TargetConditionals.h>
+		#if !TARGET_OS_IPHONE
+		#error "Not iOS"
+		#endif
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+
+		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: iOS" >&5
+printf "%s\n" "iOS" >&6; }
+		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: iOS does not support IOKit in the official SDK - using null backend" >&5
+printf "%s\n" "$as_me: WARNING: iOS does not support IOKit in the official SDK - using null backend" >&2;}
+		backend=null
+		platform=posix
+
+else case e in #(
+  e)
+		{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: Darwin/Mac OS X" >&5
 printf "%s\n" "Darwin/Mac OS X" >&6; }
-	backend=darwin
-	platform=posix
+		backend=darwin
+		platform=posix
+	 ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
 	;;
 *-haiku*)
 	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: Haiku" >&5

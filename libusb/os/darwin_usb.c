@@ -46,6 +46,7 @@
 #define DARWIN_REENUMERATE_TIMEOUT_US 10000000
 
 #include <AvailabilityMacros.h>
+#include <TargetConditionals.h>
 #if MAC_OS_X_VERSION_MIN_REQUIRED >= 1060 && MAC_OS_X_VERSION_MIN_REQUIRED < 101200
   #include <objc/objc-auto.h>
 #endif
@@ -1226,7 +1227,7 @@ static int darwin_open (struct libusb_device_handle *dev_handle) {
     /* try to open the device */
     kresult = (*(dpriv->device))->USBDeviceOpenSeize (dpriv->device);
     if (kresult != kIOReturnSuccess) {
-      usbi_warn (HANDLE_CTX (dev_handle), "USBDeviceOpen: %s", darwin_error_str(kresult));
+      usbi_warn (HANDLE_CTX (dev_handle), "USBDeviceOpenSeize: %s", darwin_error_str(kresult));
 
       if (kIOReturnExclusiveAccess != kresult) {
         return darwin_to_libusb (kresult);
@@ -1818,6 +1819,7 @@ static int darwin_reset_device (struct libusb_device_handle *dev_handle) {
   struct darwin_cached_device *dpriv = DARWIN_CACHED_DEVICE(dev_handle->dev);
   IOReturn kresult;
 
+  usbi_dbg (HANDLE_CTX (dev_handle), "ResetDevice darwin_reset_device");
   if (dpriv->capture_count > 0) {
     /* we have to use ResetDevice as USBDeviceReEnumerate() loses the authorization for capture */
     kresult = (*(dpriv->device))->ResetDevice (dpriv->device);
@@ -2452,13 +2454,14 @@ static int darwin_detach_kernel_driver (struct libusb_device_handle *dev_handle,
     usbi_dbg (ctx, "attempting to detach kernel driver from device");
 
     if (darwin_has_capture_entitlements ()) {
+#if !TARGET_OS_MACCATALYST
       /* request authorization */
       kresult = IOServiceAuthorize (dpriv->service, kIOServiceInteractionAllowed);
       if (kresult != kIOReturnSuccess) {
         usbi_warn (ctx, "IOServiceAuthorize: %s", darwin_error_str(kresult));
         return darwin_to_libusb (kresult);
       }
-
+#endif
       /* we need start() to be called again for authorization status to refresh */
       err = darwin_reload_device (dev_handle);
       if (err != LIBUSB_SUCCESS) {
@@ -2537,6 +2540,65 @@ static int darwin_capture_release_interface(struct libusb_device_handle *dev_han
 
 #endif
 
+static int darwin_wrap_sys_device(struct libusb_context *ctx,
+                                  struct libusb_device_handle *handle, intptr_t sys_dev)
+{
+    io_service_t service = (io_service_t)sys_dev;
+    struct libusb_device *dev;
+    struct darwin_cached_device *priv;
+    UInt64 session_id;
+    int ret;
+    
+    usbi_dbg(ctx, "wrap_sys_device for io_service 0x%x", service);
+    
+    /* Get the cached device for this service */
+    session_id = 0;
+    ret = darwin_get_cached_device(ctx, service, &priv, &session_id);
+    if (ret != LIBUSB_SUCCESS) {
+        usbi_err(ctx, "failed to get cached device for service");
+        return ret;
+    }
+    
+    /* Get the actual session ID from the cached device */
+    session_id = priv->session;
+    usbi_dbg(ctx, "cached device has session 0x%" PRIx64, session_id);
+    
+    dev = usbi_get_device_by_session_id(ctx, session_id);
+    if (!dev) {
+        usbi_dbg(ctx, "allocating new device for session 0x%" PRIx64, session_id);
+        
+        /* process_new_device will allocate and populate the device internally.
+         * Pass 0 as old_session_id to force allocation of a new device */
+        ret = process_new_device(ctx, priv, 0);
+        if (ret != LIBUSB_SUCCESS) {
+            usbi_err(ctx, "failed to process new device");
+            return ret;
+        }
+        
+        /* Now get the device that was created by process_new_device */
+        dev = usbi_get_device_by_session_id(ctx, session_id);
+        if (!dev) {
+            usbi_err(ctx, "device not found after process_new_device");
+            return LIBUSB_ERROR_NO_DEVICE;
+        }
+        
+        usbi_atomic_store(&dev->attached, 1);
+    }
+    
+    handle->dev = libusb_ref_device(dev);
+    
+    /* Open the device */
+    ret = darwin_open(handle);
+    if (ret != LIBUSB_SUCCESS) {
+        usbi_err(ctx, "failed to open device");
+        libusb_unref_device(dev);
+        libusb_unref_device(dev);
+        return ret;
+    }
+    
+    return LIBUSB_SUCCESS;
+}
+
 const struct usbi_os_backend usbi_backend = {
         .name = "Darwin",
         .caps = USBI_CAP_SUPPORTS_DETACH_KERNEL_DRIVER,
@@ -2546,6 +2608,7 @@ const struct usbi_os_backend usbi_backend = {
         .get_config_descriptor = darwin_get_config_descriptor,
         .hotplug_poll = darwin_hotplug_poll,
 
+        .wrap_sys_device = darwin_wrap_sys_device,
         .open = darwin_open,
         .close = darwin_close,
         .get_configuration = darwin_get_configuration,

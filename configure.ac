@@ -74,9 +74,38 @@ is_android_linux=
 AC_MSG_CHECKING([operating system])
 case $host in
 *-darwin*)
-	AC_MSG_RESULT([Darwin/Mac OS X])
-	backend=darwin
-	platform=posix
+	dnl Detect iOS vs Mac Catalyst vs macOS
+	AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+		#include <TargetConditionals.h>
+		#if TARGET_OS_MACCATALYST
+		#error "Mac Catalyst"
+		#endif
+	]], [[]])],
+	[
+		dnl Not Mac Catalyst, check if it's iOS
+		AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+			#include <TargetConditionals.h>
+			#if !TARGET_OS_IPHONE
+			#error "Not iOS"
+			#endif
+		]], [[]])],
+		[
+			AC_MSG_RESULT([iOS])
+			AC_MSG_WARN([iOS does not support IOKit in the official SDK - using null backend])
+			backend=null
+			platform=posix
+		],
+		[
+			AC_MSG_RESULT([Darwin/Mac OS X])
+			backend=darwin
+			platform=posix
+		])
+	],
+	[
+		AC_MSG_RESULT([Mac Catalyst])
+		backend=darwin
+		platform=posix
+	])
 	;;
 *-haiku*)
 	AC_MSG_RESULT([Haiku])

@@ -25,6 +25,12 @@
 
 #include "libusbi.h"
 
+/* Prevent compilation on iOS - IOKit is not available in iOS SDK */
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
+#error "Darwin backend requires IOKit which is not available on iOS. Please configure with --enable-null-backend or ensure OS_NULL is selected during build."
+#endif
+
 #include <IOKit/IOTypes.h>
 #include <IOKit/IOCFBundle.h>
 #include <IOKit/usb/IOUSBLib.h>
