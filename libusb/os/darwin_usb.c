@@ -2248,7 +2248,8 @@ static int darwin_reset_device (struct libusb_device_handle *dev_handle) {
   IOReturn kresult;
   enum libusb_error ret;
 
-#if !defined(TARGET_OS_OSX) || TARGET_OS_OSX == 1
+/* Mac Catalyst has ResetDevice; the fallback below is for platforms without it. */
+#if !defined(TARGET_OS_OSX) || TARGET_OS_OSX == 1 || TARGET_OS_MACCATALYST
   if (dpriv->capture_count > 0) {
     /* we have to use ResetDevice as USBDeviceReEnumerate() loses the authorization for capture */
     kresult = (*dpriv->device)->ResetDevice (dpriv->device);
