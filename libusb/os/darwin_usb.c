@@ -2914,7 +2914,7 @@ static int darwin_detach_kernel_driver (struct libusb_device_handle *dev_handle,
     return LIBUSB_ERROR_NOT_SUPPORTED;
   }
 
-  if (dpriv->capture_count == 0) {
+  if (!dpriv->captured) {
     usbi_dbg (ctx, "attempting to detach kernel driver from device");
 
     if (darwin_has_capture_entitlements ()) {
@@ -2943,7 +2943,10 @@ static int darwin_detach_kernel_driver (struct libusb_device_handle *dev_handle,
     if (err != LIBUSB_SUCCESS) {
       return err;
     }
+
+    dpriv->captured = true;
   }
+
   dpriv->capture_count++;
   usbi_dbg (ctx, "capture_count is now %d", dpriv->capture_count);
   return LIBUSB_SUCCESS;
@@ -2958,19 +2961,21 @@ static int darwin_attach_kernel_driver (struct libusb_device_handle *dev_handle,
     return LIBUSB_ERROR_NOT_SUPPORTED;
   }
 
-  /* A capture happens only at zero, and the count never goes below it. */
-  if (dpriv->capture_count <= 0) {
-    return LIBUSB_ERROR_NOT_FOUND;
+  if (dpriv->capture_count > 0) {
+    dpriv->capture_count--;
+    usbi_dbg (HANDLE_CTX (dev_handle), "capture_count is now %d", dpriv->capture_count);
+    if (dpriv->capture_count > 0) {
+      return LIBUSB_SUCCESS;
+    }
   }
 
-  dpriv->capture_count--;
-  usbi_dbg (HANDLE_CTX (dev_handle), "capture_count is now %d", dpriv->capture_count);
-  if (dpriv->capture_count > 0) {
-    return LIBUSB_SUCCESS;
+  if (!dpriv->captured) {
+    return LIBUSB_ERROR_NOT_FOUND;
   }
 
   usbi_dbg (HANDLE_CTX (dev_handle), "reenumerating device for kernel driver attach");
 
+  dpriv->captured = false;
   /* reset device to attach kernel drivers */
   return darwin_reenumerate_device (dev_handle, false);
 }
@@ -2996,12 +3001,19 @@ static int darwin_capture_release_interface(struct libusb_device_handle *dev_han
     return ret;
   }
 
-  if (dev_handle->auto_detach_kernel_driver && dpriv->capture_count > 0) {
-    ret = darwin_attach_kernel_driver (dev_handle, iface);
-    if (LIBUSB_SUCCESS != ret) {
-      usbi_info (HANDLE_CTX (dev_handle), "on attempt to reattach the kernel driver got ret=%d", ret);
+  /* Re-attaching the kernel driver is what auto_detach_kernel_driver gates; the capture
+   * reference the claim took is given back either way. */
+  if (dpriv->capture_count > 0) {
+    if (dev_handle->auto_detach_kernel_driver) {
+      ret = darwin_attach_kernel_driver (dev_handle, iface);
+      if (LIBUSB_SUCCESS != ret) {
+        usbi_info (HANDLE_CTX (dev_handle), "on attempt to reattach the kernel driver got ret=%d", ret);
+      }
+      /* ignore the error as the interface was successfully released */
+    } else {
+      dpriv->capture_count--;
+      usbi_dbg (HANDLE_CTX (dev_handle), "capture_count is now %d", dpriv->capture_count);
     }
-    /* ignore the error as the interface was successfully released */
   }
 
   return LIBUSB_SUCCESS;
