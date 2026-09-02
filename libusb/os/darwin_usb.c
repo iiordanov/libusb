@@ -1908,9 +1908,9 @@ static int darwin_claim_interface(struct libusb_device_handle *dev_handle, uint8
   }
 
   /* claim the interface */
-  kresult = (*IOINTERFACE(cInterface))->USBInterfaceOpen(IOINTERFACE(cInterface));
+  kresult = (*IOINTERFACE(cInterface))->USBInterfaceOpenSeize(IOINTERFACE(cInterface));
   if (kresult != kIOReturnSuccess) {
-    usbi_info (ctx, "USBInterfaceOpen: %s", darwin_error_str(kresult));
+    usbi_info (ctx, "USBInterfaceOpenSeize: %s", darwin_error_str(kresult));
     return darwin_to_libusb (kresult);
   }
 
@@ -2861,10 +2861,13 @@ static int darwin_free_streams (struct libusb_device_handle *dev_handle, unsigne
 
 #if !defined(TARGET_OS_OSX) || TARGET_OS_OSX == 1
 #include <Security/Security.h>
+#define darwin_service_authorize IOServiceAuthorize
 #else
 typedef struct __SecTask *SecTaskRef;
 extern SecTaskRef SecTaskCreateFromSelf(CFAllocatorRef allocator);
 extern CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error);
+/* IOKit withholds this declaration from Mac Catalyst but exports the symbol. */
+extern kern_return_t darwin_service_authorize (io_service_t service, uint32_t options) __asm__("_IOServiceAuthorize");
 #endif
 
 static bool darwin_has_capture_entitlements (void) {
@@ -2915,7 +2918,7 @@ static int darwin_detach_kernel_driver (struct libusb_device_handle *dev_handle,
 
     if (darwin_has_capture_entitlements ()) {
       /* request authorization */
-      kresult = IOServiceAuthorize (dpriv->service, kIOServiceInteractionAllowed);
+      kresult = darwin_service_authorize (dpriv->service, kIOServiceInteractionAllowed);
       if (kresult != kIOReturnSuccess) {
         usbi_warn (ctx, "IOServiceAuthorize: %s", darwin_error_str(kresult));
         return darwin_to_libusb (kresult);
@@ -2941,6 +2944,7 @@ static int darwin_detach_kernel_driver (struct libusb_device_handle *dev_handle,
     }
   }
   dpriv->capture_count++;
+  usbi_dbg (ctx, "capture_count is now %d", dpriv->capture_count);
   return LIBUSB_SUCCESS;
 }
 
@@ -2953,7 +2957,13 @@ static int darwin_attach_kernel_driver (struct libusb_device_handle *dev_handle,
     return LIBUSB_ERROR_NOT_SUPPORTED;
   }
 
+  /* A capture happens only at zero, and the count never goes below it. */
+  if (dpriv->capture_count <= 0) {
+    return LIBUSB_ERROR_NOT_FOUND;
+  }
+
   dpriv->capture_count--;
+  usbi_dbg (HANDLE_CTX (dev_handle), "capture_count is now %d", dpriv->capture_count);
   if (dpriv->capture_count > 0) {
     return LIBUSB_SUCCESS;
   }

@@ -25,6 +25,11 @@
 
 #include "libusbi.h"
 
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
+#error "The Darwin backend needs IOKit; an iOS build must select the null backend."
+#endif
+
 #include <IOKit/IOTypes.h>
 #include <IOKit/IOCFBundle.h>
 #include <IOKit/usb/IOUSBLib.h>
