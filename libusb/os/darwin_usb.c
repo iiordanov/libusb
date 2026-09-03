@@ -2248,9 +2248,8 @@ static int darwin_reset_device (struct libusb_device_handle *dev_handle) {
   IOReturn kresult;
   enum libusb_error ret;
 
-/* Mac Catalyst has ResetDevice; the fallback below is for platforms without it. */
 #if !defined(TARGET_OS_OSX) || TARGET_OS_OSX == 1 || TARGET_OS_MACCATALYST
-  if (dpriv->capture_count > 0) {
+  if (dpriv->captured) {
     /* we have to use ResetDevice as USBDeviceReEnumerate() loses the authorization for capture */
     kresult = (*dpriv->device)->ResetDevice (dpriv->device);
     ret = darwin_to_libusb (kresult);
@@ -2260,21 +2259,18 @@ static int darwin_reset_device (struct libusb_device_handle *dev_handle) {
 #else
   /* ResetDevice() is missing on non-macOS platforms */
   ret = darwin_reenumerate_device (dev_handle, false);
-  if ((ret == LIBUSB_SUCCESS || ret == LIBUSB_ERROR_NOT_FOUND) && dpriv->capture_count > 0) {
+  if ((ret == LIBUSB_SUCCESS || ret == LIBUSB_ERROR_NOT_FOUND) && dpriv->captured) {
     int capture_count;
     uint8_t active_config = dpriv->active_config;
     unsigned long claimed_interfaces = dev_handle->claimed_interfaces;
 
-    /* save old capture_count */
+    /* The re-enumerate above handed the device back, so it has to be captured again. */
     capture_count = dpriv->capture_count;
-    /* reset capture count */
-    dpriv->capture_count = 0;
-    /* attempt to detach kernel driver again as it is now re-attached */
+    dpriv->captured = false;
     ret = darwin_detach_kernel_driver (dev_handle, 0);
     if (ret != LIBUSB_SUCCESS) {
       return ret;
     }
-    /* restore capture_count */
     dpriv->capture_count = capture_count;
     /* restore configuration */
     ret = darwin_restore_state (dev_handle, active_config, claimed_interfaces);
