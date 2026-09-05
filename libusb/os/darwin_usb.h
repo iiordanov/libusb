@@ -124,7 +124,6 @@ struct darwin_cached_device {
   int                   refcount;
   atomic_bool           in_reenumerate;
   int                   capture_count;
-  bool                  captured;
 };
 
 struct darwin_device_priv {

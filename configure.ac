@@ -74,38 +74,24 @@ is_android_linux=
 AC_MSG_CHECKING([operating system])
 case $host in
 *-darwin*)
-	dnl Detect iOS vs Mac Catalyst vs macOS
+	dnl The Darwin backend needs IOKit, which only iOS proper is without. A compile
+	dnl failure here selects the null backend, so a broken check does not reach for IOKit.
 	AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
 		#include <TargetConditionals.h>
-		#if TARGET_OS_MACCATALYST
-		#error "Mac Catalyst"
+		#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
+		#error "iOS"
 		#endif
 	]], [[]])],
 	[
-		dnl Not Mac Catalyst, check if it's iOS
-		AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-			#include <TargetConditionals.h>
-			#if !TARGET_OS_IPHONE
-			#error "Not iOS"
-			#endif
-		]], [[]])],
-		[
-			AC_MSG_RESULT([iOS])
-			AC_MSG_WARN([iOS does not support IOKit in the official SDK - using null backend])
-			backend=null
-			platform=posix
-		],
-		[
-			AC_MSG_RESULT([Darwin/Mac OS X])
-			backend=darwin
-			platform=posix
-		])
+		AC_MSG_RESULT([Darwin])
+		backend=darwin
 	],
 	[
-		AC_MSG_RESULT([Mac Catalyst])
-		backend=darwin
-		platform=posix
+		AC_MSG_RESULT([iOS])
+		AC_MSG_WARN([IOKit is unavailable on iOS - using the null backend])
+		backend=null
 	])
+	platform=posix
 	;;
 *-haiku*)
 	AC_MSG_RESULT([Haiku])
