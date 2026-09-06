@@ -2940,7 +2940,9 @@ static int darwin_detach_kernel_driver (struct libusb_device_handle *dev_handle,
       return err;
     }
   }
+
   dpriv->capture_count++;
+  usbi_dbg (ctx, "capture_count is now %d", dpriv->capture_count);
   return LIBUSB_SUCCESS;
 }
 
@@ -2953,7 +2955,14 @@ static int darwin_attach_kernel_driver (struct libusb_device_handle *dev_handle,
     return LIBUSB_ERROR_NOT_SUPPORTED;
   }
 
+  /* Counting past zero re-enumerates a device that was never captured, and leaves a count
+   * no later capture can bring back to zero. */
+  if (dpriv->capture_count == 0) {
+    return LIBUSB_ERROR_NOT_FOUND;
+  }
+
   dpriv->capture_count--;
+  usbi_dbg (HANDLE_CTX (dev_handle), "capture_count is now %d", dpriv->capture_count);
   if (dpriv->capture_count > 0) {
     return LIBUSB_SUCCESS;
   }
