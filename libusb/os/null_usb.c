@@ -18,6 +18,19 @@
 
 #include "libusbi.h"
 
+#if defined(__APPLE__)
+/* On Apple platforms the header leaves both clocks to the backend. */
+void usbi_get_monotonic_time(struct timespec *tp)
+{
+	ASSERT_EQ(clock_gettime(CLOCK_MONOTONIC, tp), 0);
+}
+
+void usbi_get_real_time(struct timespec *tp)
+{
+	ASSERT_EQ(clock_gettime(CLOCK_REALTIME, tp), 0);
+}
+#endif
+
 static int
 null_get_device_list(struct libusb_context * ctx,
 	struct discovered_devs **discdevs)
